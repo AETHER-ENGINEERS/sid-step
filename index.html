@@ -143,6 +143,8 @@ function applyDefaults(p) {
   };
   p.voices.forEach((v) => {
     if (typeof v.filter !== "boolean") v.filter = true;
+    if (typeof v.mute !== "boolean") v.mute = false;
+    v.level = clampNum(v.level, 0.7, 0, 1);
     v.fine = clampNum(v.fine, 0, -100, 100);
   });
   p.attack = clampNum(p.attack, 0.004, 0.001, 1.5);
@@ -372,7 +374,6 @@ function createEngine() {
     const ctx = self.ctx;
     if (ctx.state !== "running") return;
     if (self.audioOrigin == null) self.audioOrigin = ctx.currentTime - elapsed;
-    applyDefaults(pattern);
     const filter = pattern.filter;
     const count = (filter.low ? 1 : 0) + (filter.band ? 1 : 0) + (filter.high ? 1 : 0);
     const level = count ? 1 / Math.sqrt(count) : 0;
@@ -459,6 +460,9 @@ function createEngine() {
     node.connect(gain);
     gain.connect(slot.dry);
     gain.connect(slot.send);
+    const through = voice.filter !== false;
+    slot.send.gain.setTargetAtTime(through ? 1 : 0, ctx.currentTime, 0.01);
+    slot.dry.gain.setTargetAtTime(through ? 0 : 1, ctx.currentTime, 0.01);
     const midi = 60 + voice.octave * 12 + semi;
     const hz = sidHz(midi) * 2 ** ((voice.fine || 0) / 1200);
     if (node.frequency) node.frequency.setValueAtTime(hz, when);
@@ -751,6 +755,8 @@ function validPattern(payload) {
     if (![-1, 0, 1].includes(voice.octave)) return false;
     if (!Number.isInteger(voice.pulse) || voice.pulse < 1 || voice.pulse > 15) return false;
     if (voice.fine != null && (typeof voice.fine !== "number" || voice.fine < -100 || voice.fine > 100)) return false;
+    if (typeof voice.level !== "number" || !Number.isFinite(voice.level) || voice.level < 0 || voice.level > 1) return false;
+    if (typeof voice.mute !== "boolean") return false;
     if (!Array.isArray(voice.steps) || voice.steps.length !== 16) return false;
     if (voice.steps.some((step) => step !== null && (!Number.isInteger(step) || step < 0 || step > 7))) return false;
   }

@@ -19,7 +19,8 @@ Older builds stay in [archive/](archive/) so each step is still there:
 | [archive/sid-step-0.0.9.xdc](archive/sid-step-0.0.9.xdc) | Cutoff, resonance, and a sample row. The screen stayed black because a pitch label was missing. |
 | [archive/sid-step-0.0.10.xdc](archive/sid-step-0.0.10.xdc) | The screen draws. Notes are a short blip. No live keys. |
 | [archive/sid-step-0.0.11.xdc](archive/sid-step-0.0.11.xdc) | Envelope, filter wobble, and fine tune. The keys were a second row of note letters, easy to miss. |
-| [sid-step.xdc](sid-step.xdc) | 0.0.12. Current. A piano stays pinned to the bottom. White and black keys. |
+| [archive/sid-step-0.0.12.xdc](archive/sid-step-0.0.12.xdc) | Piano on the bottom. A shared pattern with a bad loudness could stall the clock. |
+| [sid-step.xdc](sid-step.xdc) | 0.0.13. Current. Shared loudness and mute are checked. Keys follow Dry or Filtered even when stopped. |
 
 Press Play. The bright column moves across all three lanes. Pick a note letter, tap a pad to place it, tap it again to clear it.
 
