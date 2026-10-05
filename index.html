@@ -69,7 +69,7 @@ const STORE = "sid-step-ui-v2";
 
 function empty() { return Array(16).fill(null); }
 function voice(id, name, blurb, wave, octave, pulse, level, steps) {
-  return { id, name, blurb, wave, octave, pulse, level, mute: false, filter: true, steps: steps.slice() };
+  return { id, name, blurb, wave, octave, pulse, level, mute: false, filter: true, fine: 0, steps: steps.slice() };
 }
 function emptySample() {
   return { level: 0.75, mute: false, filter: false, steps: empty() };
@@ -79,7 +79,9 @@ function groove() {
 }
 function presetTogether() {
   return {
-    bpm: 108, tone: 0.62, ring: 0.28, volume: 0.85, sample: groove(),
+    bpm: 108, tone: 0.62, ring: 0.28, volume: 0.85,
+    attack: 0.02, decay: 0.18, sustain: 0.6, release: 0.22, lfoRate: 5, lfoDepth: 0.15,
+    sample: groove(),
     voices: [
       voice("tune", "Tune", "The melody on top", "soft", 0, 8, 0.75, [0,null,2,null,4,null,2,null,7,null,4,null,2,null,0,null]),
       voice("bass", "Bass", "The low line underneath", "bright", -1, 4, 0.6, [0,null,null,null,0,null,3,null,4,null,null,null,3,null,0,null]),
@@ -133,7 +135,16 @@ function applyDefaults(p) {
     band: !!(filter && filter.band === true),
     high: !!(filter && filter.high === true)
   };
-  p.voices.forEach((v) => { if (typeof v.filter !== "boolean") v.filter = true; });
+  p.voices.forEach((v) => {
+    if (typeof v.filter !== "boolean") v.filter = true;
+    v.fine = clampNum(v.fine, 0, -100, 100);
+  });
+  p.attack = clampNum(p.attack, 0.004, 0.001, 1.5);
+  p.decay = clampNum(p.decay, 0.001, 0.001, 1.5);
+  p.sustain = clampNum(p.sustain, 1, 0, 1);
+  p.release = clampNum(p.release, 0.012, 0.001, 2);
+  p.lfoRate = clampNum(p.lfoRate, 4, 0.1, 20);
+  p.lfoDepth = clampNum(p.lfoDepth, 0, 0, 1);
   const known = ["kick", "snare", "hat"];
   if (!p.sample || !Array.isArray(p.sample.steps)) p.sample = emptySample();
   else {
@@ -147,6 +158,39 @@ function applyDefaults(p) {
     };
   }
   return p;
+}
+function clampNum(value, fallback, min, max) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, value));
+}
+function tunedHz(octave, degree, fine) {
+  return sidHz(midiFor(octave, degree)) * 2 ** ((fine || 0) / 1200);
+}
+function writeEnvelope(gain, peak, when, dur, env, drum) {
+  if (drum) {
+    const attack = 0.002;
+    const release = Math.min(0.05, dur * 0.45);
+    gain.setValueAtTime(0, when);
+    gain.linearRampToValueAtTime(peak, when + attack);
+    gain.setValueAtTime(peak, when + Math.max(attack, dur - release));
+    gain.linearRampToValueAtTime(0, when + dur);
+    return;
+  }
+  const gate = Math.max(0.03, dur * 0.9);
+  let attack = clampNum(env.attack, 0.004, 0.001, 1.5);
+  let decay = clampNum(env.decay, 0.001, 0.001, 1.5);
+  const sustain = clampNum(env.sustain, 1, 0, 1);
+  const release = clampNum(env.release, 0.012, 0.001, 2);
+  if (attack + decay > gate) {
+    const scale = gate / (attack + decay);
+    attack *= scale;
+    decay *= scale;
+  }
+  gain.setValueAtTime(0, when);
+  gain.linearRampToValueAtTime(peak, when + attack);
+  gain.linearRampToValueAtTime(peak * sustain, when + attack + decay);
+  gain.setValueAtTime(peak * sustain, when + gate);
+  gain.linearRampToValueAtTime(0, when + gate + release);
 }
 function load() {
   try {
@@ -226,6 +270,15 @@ function createEngine() {
       self.bands[key] = filter;
       self.modes[key] = gain;
     });
+    const lfo = ctx.createOscillator();
+    lfo.type = "sine";
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 0;
+    lfo.connect(lfoGain);
+    ["low", "band", "high"].forEach((key) => lfoGain.connect(self.bands[key].frequency));
+    lfo.start();
+    self.lfo = lfo;
+    self.lfoGain = lfoGain;
     master.connect(ctx.destination);
     const sampleGain = ctx.createGain();
     const sampleDry = ctx.createGain();
@@ -286,16 +339,10 @@ function createEngine() {
     const gain = slot.gain.gain;
     gain.cancelScheduledValues(when);
     if (voice.mute || degree == null || !slot.node) { gain.setValueAtTime(0, when); return; }
-    const hz = sidHz(midiFor(voice.octave, degree));
+    const hz = tunedHz(voice.octave, degree, voice.fine);
     if (slot.node.frequency) slot.node.frequency.setValueAtTime(hz, when);
     else slot.node.playbackRate.setValueAtTime(Math.max(0.08, hz / 160), when);
-    const peak = 0.28 * voice.level;
-    const attack = voice.wave === "drum" ? 0.002 : 0.004;
-    const release = voice.wave === "drum" ? Math.min(0.05, dur * 0.45) : 0.012;
-    gain.setValueAtTime(0, when);
-    gain.linearRampToValueAtTime(peak, when + attack);
-    gain.setValueAtTime(peak, when + Math.max(attack, dur - release));
-    gain.linearRampToValueAtTime(0, when + dur);
+    writeEnvelope(gain, 0.28 * voice.level, when, dur, pattern, voice.wave === "drum");
   }
   function hitSample(stepIndex, when) {
     const sample = pattern.sample;
@@ -329,6 +376,10 @@ function createEngine() {
       self.modes[key].gain.setTargetAtTime(filter[key] ? level : 0, ctx.currentTime, 0.02);
     });
     self.master.gain.setTargetAtTime(pattern.volume, ctx.currentTime, 0.03);
+    if (self.lfo && self.lfoGain) {
+      self.lfo.frequency.setTargetAtTime(clampNum(pattern.lfoRate, 4, 0.1, 20), ctx.currentTime, 0.05);
+      self.lfoGain.gain.setTargetAtTime(clampNum(pattern.lfoDepth, 0, 0, 1) * 1800, ctx.currentTime, 0.05);
+    }
     pattern.voices.forEach((voice, i) => {
       const through = voice.filter !== false;
       self.voices[i].send.gain.setTargetAtTime(through ? 1 : 0, ctx.currentTime, 0.02);
@@ -378,6 +429,37 @@ function createEngine() {
       }
     });
     paintHead(null);
+  };
+  self.tap = function (voiceIndex, degree) {
+    boot();
+    const ctx = self.ctx;
+    const voice = pattern.voices[voiceIndex];
+    const slot = self.voices[voiceIndex];
+    if (!ctx || !voice || !slot) return;
+    if (ctx.state === "suspended") ctx.resume();
+    const when = ctx.currentTime + 0.02;
+    const dur = 0.4;
+    let node;
+    if (voice.wave === "drum") {
+      node = ctx.createBufferSource();
+      node.buffer = self.noise;
+      node.loop = true;
+    } else {
+      node = ctx.createOscillator();
+      if (voice.wave === "hollow") node.setPeriodicWave(pulseWave(ctx, voice.pulse));
+      else node.type = voice.wave === "bright" ? "sawtooth" : "triangle";
+    }
+    const gain = ctx.createGain();
+    node.connect(gain);
+    gain.connect(slot.dry);
+    gain.connect(slot.send);
+    const hz = tunedHz(voice.octave, degree, voice.fine);
+    if (node.frequency) node.frequency.setValueAtTime(hz, when);
+    else node.playbackRate.setValueAtTime(Math.max(0.08, hz / 160), when);
+    writeEnvelope(gain.gain, 0.28 * voice.level, when, dur, pattern, voice.wave === "drum");
+    node.start(when);
+    node.stop(when + dur + Math.max(0.05, pattern.release) + 0.05);
+    node.onended = () => { try { node.disconnect(); gain.disconnect(); } catch (e) {} };
   };
   return self;
 }
@@ -540,6 +622,24 @@ function render() {
     width.append(range);
     editor.append(width);
   }
+  editor.append(el("p", "tiny muted", "Hear it"));
+  const keys = el("div", "row");
+  NOTES.forEach((name, degree) => {
+    const b = el("button", "", name);
+    b.onpointerdown = (event) => { event.preventDefault(); eng.tap(active, degree); };
+    keys.append(b);
+  });
+  const fine = el("label", "slider");
+  const fineTop = document.createElement("span");
+  fineTop.append("Fine");
+  const fineHint = document.createElement("em");
+  fineHint.textContent = (voice.fine || 0) + " cents";
+  fineTop.append(fineHint);
+  const fineRange = document.createElement("input");
+  fineRange.type = "range"; fineRange.min = "-100"; fineRange.max = "100"; fineRange.value = String(voice.fine || 0);
+  fineRange.oninput = () => { voice.fine = Number(fineRange.value); fineHint.textContent = voice.fine + " cents"; save(); };
+  fine.append(fineTop, fineRange);
+  editor.append(keys, fine);
   editor.append(el("p", "tiny muted", "Note to place"));
   const notes = el("div", "row");
   NOTES.forEach((name, degree) => {
@@ -571,6 +671,14 @@ function render() {
   grid.append(slider("Cutoff", "Where the filter opens", 0, 100, Math.round(pattern.tone * 100), (v) => { pattern.tone = v / 100; save(); }));
   grid.append(slider("Resonance", "How sharp the peak is", 0, 100, Math.round(pattern.ring * 100), (v) => { pattern.ring = v / 100; save(); }));
   grid.append(slider("Volume", "Loud or quiet", 0, 100, Math.round(pattern.volume * 100), (v) => { pattern.volume = v / 100; save(); }));
+  const env = el("div", "sliders");
+  env.append(slider("Attack", Math.round(pattern.attack * 1000) + " ms", 1, 400, Math.round(pattern.attack * 1000), (v) => { pattern.attack = v / 1000; save(); }));
+  env.append(slider("Decay", Math.round(pattern.decay * 1000) + " ms", 1, 400, Math.round(pattern.decay * 1000), (v) => { pattern.decay = v / 1000; save(); }));
+  env.append(slider("Sustain", "Level after the decay", 0, 100, Math.round(pattern.sustain * 100), (v) => { pattern.sustain = v / 100; save(); }));
+  env.append(slider("Release", Math.round(pattern.release * 1000) + " ms", 1, 800, Math.round(pattern.release * 1000), (v) => { pattern.release = v / 1000; save(); }));
+  env.append(slider("LFO rate", pattern.lfoRate.toFixed(1) + " Hz", 1, 200, Math.round(pattern.lfoRate * 10), (v) => { pattern.lfoRate = v / 10; save(); }));
+  env.append(slider("LFO amount", "How far the cutoff wanders", 0, 100, Math.round(pattern.lfoDepth * 100), (v) => { pattern.lfoDepth = v / 100; save(); }));
+  sliders.append(env);
   sliders.append(grid);
 
   const shareRow = el("div", "row");
@@ -578,7 +686,7 @@ function render() {
     const share = el("button", "", "Share pattern");
     share.onclick = () => {
       webxdc.sendUpdate({
-        payload: { v: 1, bpm: pattern.bpm, tone: pattern.tone, ring: pattern.ring, volume: pattern.volume, filter: pattern.filter, sample: pattern.sample, voices: pattern.voices },
+        payload: { v: 1, bpm: pattern.bpm, tone: pattern.tone, ring: pattern.ring, volume: pattern.volume, attack: pattern.attack, decay: pattern.decay, sustain: pattern.sustain, release: pattern.release, lfoRate: pattern.lfoRate, lfoDepth: pattern.lfoDepth, filter: pattern.filter, sample: pattern.sample, voices: pattern.voices },
         info: "SID pattern",
         summary: "SID-STEP",
         document: "SID-STEP"
@@ -620,7 +728,7 @@ function validPattern(payload) {
     if (!voice || !WAVES.includes(voice.wave)) return false;
     if (![-1, 0, 1].includes(voice.octave)) return false;
     if (!Number.isInteger(voice.pulse) || voice.pulse < 1 || voice.pulse > 15) return false;
-    if (voice.filter != null && typeof voice.filter !== "boolean") return false;
+    if (voice.fine != null && (typeof voice.fine !== "number" || voice.fine < -100 || voice.fine > 100)) return false;
     if (!Array.isArray(voice.steps) || voice.steps.length !== 16) return false;
     if (voice.steps.some((step) => step !== null && (!Number.isInteger(step) || step < 0 || step > 7))) return false;
   }
@@ -633,7 +741,16 @@ function validPattern(payload) {
     if (sample.mute != null && typeof sample.mute !== "boolean") return false;
     if (sample.filter != null && typeof sample.filter !== "boolean") return false;
   }
+  if (!optRange(payload.attack, 0.001, 1.5)) return false;
+  if (!optRange(payload.decay, 0.001, 1.5)) return false;
+  if (!optRange(payload.sustain, 0, 1)) return false;
+  if (!optRange(payload.release, 0.001, 2)) return false;
+  if (!optRange(payload.lfoRate, 0.1, 20)) return false;
+  if (!optRange(payload.lfoDepth, 0, 1)) return false;
   return true;
+}
+function optRange(value, min, max) {
+  return value == null || (typeof value === "number" && Number.isFinite(value) && value >= min && value <= max);
 }
 
 window.addEventListener("keydown", (event) => {
