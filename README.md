@@ -10,7 +10,8 @@ Older builds stay in [archive/](archive/) so each step is still there:
 | --- | --- |
 | [archive/sid-step-0.0.1.xdc](archive/sid-step-0.0.1.xdc) | First drop. Clock stuck on the first column. |
 | [archive/sid-step-0.0.2.xdc](archive/sid-step-0.0.2.xdc) | Three lanes and note names. Second press of Play scheduled the bar into the future. |
-| [sid-step.xdc](sid-step.xdc) | 0.0.3. Play survives stop and start. Shared patterns are checked before they touch the engine. |
+| [archive/sid-step-0.0.3.xdc](archive/sid-step-0.0.3.xdc) | Play survives stop and start. Shared patterns are checked. Hollow-wave cache never hit. |
+| [sid-step.xdc](sid-step.xdc) | 0.0.4. Current. The hollow-wave cache hits, and a saved pattern is checked the same way as a shared one. |
 
 Press Play. The bright column moves across all three lanes. Pick a note letter, tap a pad to place it, tap it again to clear it.
 

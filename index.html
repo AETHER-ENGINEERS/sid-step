@@ -45,7 +45,6 @@ Latest timestamp wins. Not an SPDX replacement. No profit or proprietary enclosu
   input[type="range"] { width: 100%; accent-color: var(--accent); }
   .tiny { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
 </style>
-<script src="webxdc.js"></script>
 </head>
 <body>
 <main id="app"></main>
@@ -120,11 +119,17 @@ function load() {
   try {
     const raw = localStorage.getItem(STORE);
     const parsed = raw && JSON.parse(raw);
-    if (parsed && parsed.voices && parsed.voices.length === 3 && parsed.voices.every((v) => v.steps && v.steps.length === 16)) return parsed;
+    if (parsed && parsed.v == null) parsed.v = 1;
+    if (validPattern(parsed)) return parsed;
   } catch (e) {}
-  return presetTogether();
+  const fresh = presetTogether();
+  fresh.v = 1;
+  return fresh;
 }
-function save() { try { localStorage.setItem(STORE, JSON.stringify(pattern)); } catch (e) {} }
+function save() {
+  pattern.v = 1;
+  try { localStorage.setItem(STORE, JSON.stringify(pattern)); } catch (e) {}
+}
 
 function createEngine() {
   const self = {
@@ -163,12 +168,13 @@ function createEngine() {
     });
   }
   function pulseWave(ctx, duty) {
-    const d = Math.max(1, Math.min(15, duty)) / 16;
-    if (self.waves.has(d) && ctx === self.ctx) return self.waves.get(d);
+    const width = Math.max(1, Math.min(15, duty | 0));
+    const d = width / 16;
+    if (self.waves.has(width) && ctx === self.ctx) return self.waves.get(width);
     const real = new Float32Array(32), imag = new Float32Array(32);
     for (let n = 1; n < 32; n++) imag[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * d);
     const wave = ctx.createPeriodicWave(real, imag);
-    if (ctx === self.ctx) self.waves.set(d, wave);
+    if (ctx === self.ctx) self.waves.set(width, wave);
     return wave;
   }
   function ensure(slot, wave, pulse, when) {
