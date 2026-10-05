@@ -15,7 +15,8 @@ Older builds stay in [archive/](archive/) so each step is still there:
 | [archive/sid-step-0.0.5.xdc](archive/sid-step-0.0.5.xdc) | Script tag restored. Full 24-bit pitch register. `version` is already in the manifest. |
 | [archive/sid-step-0.0.6.xdc](archive/sid-step-0.0.6.xdc) | Update listener cannot be torn down by a bad pattern. No master volume control. |
 | [archive/sid-step-0.0.7.xdc](archive/sid-step-0.0.7.xdc) | Master volume. One lowpass shared by every track. |
-| [sid-step.xdc](sid-step.xdc) | 0.0.8. Current. Low, band, and high can be mixed. Each track can stay dry. |
+| [archive/sid-step-0.0.8.xdc](archive/sid-step-0.0.8.xdc) | Low, band, and high. Cutoff and resonance were still labeled Tone and Ring. No sample row. |
+| [sid-step.xdc](sid-step.xdc) | 0.0.9. Current. Cutoff and resonance are named. A sample row plays kick, snare, and hat without using a SID voice. |
 
 Press Play. The bright column moves across all three lanes. Pick a note letter, tap a pad to place it, tap it again to clear it.
 

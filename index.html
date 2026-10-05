@@ -61,16 +61,24 @@ const WAVE_HELP = {
   hollow: ["Hollow", "Thin and nasal. Width changes the color"],
   drum: ["Beat", "A tick. Higher notes are tighter"]
 };
-const OCTAVE_HELP = { "-1": "Low", "0": "Mid", "1": "High" };
+const HITS = [null, "kick", "snare", "hat"];
+const HIT_NAME = { kick: "Kick", snare: "Snare", hat: "Hat" };
+const HIT_MARK = { kick: "K", snare: "S", hat: "H" };
 const STORE = "sid-step-ui-v2";
 
 function empty() { return Array(16).fill(null); }
 function voice(id, name, blurb, wave, octave, pulse, level, steps) {
   return { id, name, blurb, wave, octave, pulse, level, mute: false, filter: true, steps: steps.slice() };
 }
+function emptySample() {
+  return { level: 0.75, mute: false, filter: false, steps: empty() };
+}
+function groove() {
+  return { level: 0.75, mute: false, filter: false, steps: ["kick", null, "hat", null, "snare", null, "hat", null, "kick", null, "hat", null, "snare", null, "hat", null] };
+}
 function presetTogether() {
   return {
-    bpm: 108, tone: 0.62, ring: 0.28, volume: 0.85,
+    bpm: 108, tone: 0.62, ring: 0.28, volume: 0.85, sample: groove(),
     voices: [
       voice("tune", "Tune", "The melody on top", "soft", 0, 8, 0.75, [0,null,2,null,4,null,2,null,7,null,4,null,2,null,0,null]),
       voice("bass", "Bass", "The low line underneath", "bright", -1, 4, 0.6, [0,null,null,null,0,null,3,null,4,null,null,null,3,null,0,null]),
@@ -125,6 +133,18 @@ function applyDefaults(p) {
     high: !!(filter && filter.high === true)
   };
   p.voices.forEach((v) => { if (typeof v.filter !== "boolean") v.filter = true; });
+  const known = ["kick", "snare", "hat"];
+  if (!p.sample || !Array.isArray(p.sample.steps)) p.sample = emptySample();
+  else {
+    const steps = empty();
+    for (let i = 0; i < 16; i++) steps[i] = known.includes(p.sample.steps[i]) ? p.sample.steps[i] : null;
+    p.sample = {
+      level: typeof p.sample.level === "number" && p.sample.level >= 0 && p.sample.level <= 1 ? p.sample.level : 0.75,
+      mute: p.sample.mute === true,
+      filter: p.sample.filter === true,
+      steps
+    };
+  }
   return p;
 }
 function load() {
@@ -161,11 +181,34 @@ function createEngine() {
     }
     return buf;
   }
+  function makeHits(ctx) {
+    const make = (kind) => {
+      const seconds = kind === "hat" ? 0.05 : kind === "snare" ? 0.16 : 0.22;
+      const len = Math.floor(ctx.sampleRate * seconds);
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const data = buf.getChannelData(0);
+      let n = 1;
+      for (let i = 0; i < len; i++) {
+        const t = i / ctx.sampleRate;
+        n = (n * 1664525 + 1013904223) >>> 0;
+        const noise = (n / 0xffffffff) * 2 - 1;
+        if (kind === "kick") {
+          const f = 150 * Math.pow(40 / 150, t / 0.22);
+          data[i] = Math.sin(2 * Math.PI * f * t) * Math.exp(-t * 16);
+        } else if (kind === "snare") {
+          data[i] = (Math.sin(2 * Math.PI * 180 * t) * Math.exp(-t * 24) * 0.55 + noise * 0.75) * Math.exp(-t * 16);
+        } else data[i] = noise * Math.exp(-t * 55);
+      }
+      return buf;
+    };
+    return { kick: make("kick"), snare: make("snare"), hat: make("hat") };
+  }
   function boot() {
     if (self.ctx) return;
     const ctx = new AudioContext();
     self.ctx = ctx;
     self.noise = makeNoise(ctx);
+    self.hits = makeHits(ctx);
     const filterIn = ctx.createGain();
     const master = ctx.createGain();
     const kinds = [["low", "lowpass"], ["band", "bandpass"], ["high", "highpass"]];
@@ -183,6 +226,16 @@ function createEngine() {
       self.modes[key] = gain;
     });
     master.connect(ctx.destination);
+    const sampleGain = ctx.createGain();
+    const sampleDry = ctx.createGain();
+    const sampleSend = ctx.createGain();
+    sampleDry.gain.value = 1;
+    sampleSend.gain.value = 0;
+    sampleGain.connect(sampleDry);
+    sampleGain.connect(sampleSend);
+    sampleDry.connect(master);
+    sampleSend.connect(filterIn);
+    self.sampleBus = { gain: sampleGain, dry: sampleDry, send: sampleSend };
     self.master = master;
     self.voices = [0, 1, 2].map(() => {
       const gain = ctx.createGain();
@@ -243,6 +296,20 @@ function createEngine() {
     gain.setValueAtTime(peak, when + Math.max(attack, dur - release));
     gain.linearRampToValueAtTime(0, when + dur);
   }
+  function hitSample(stepIndex, when) {
+    const sample = pattern.sample;
+    if (!sample || sample.mute || !self.hits || !self.sampleBus) return;
+    const id = sample.steps[stepIndex];
+    if (!id) return;
+    const src = self.ctx.createBufferSource();
+    src.buffer = self.hits[id];
+    const gain = self.ctx.createGain();
+    gain.gain.value = 0.85 * sample.level;
+    src.connect(gain);
+    gain.connect(self.sampleBus.gain);
+    src.start(when);
+    src.onended = () => { try { src.disconnect(); gain.disconnect(); } catch (e) {} };
+  }
   function tick() {
     if (!self.playing || !self.ctx) return;
     const dur = 60 / pattern.bpm / 4;
@@ -266,12 +333,18 @@ function createEngine() {
       self.voices[i].send.gain.setTargetAtTime(through ? 1 : 0, ctx.currentTime, 0.02);
       self.voices[i].dry.gain.setTargetAtTime(through ? 0 : 1, ctx.currentTime, 0.02);
     });
+    if (self.sampleBus && pattern.sample) {
+      const through = pattern.sample.filter === true;
+      self.sampleBus.send.gain.setTargetAtTime(through ? 1 : 0, ctx.currentTime, 0.02);
+      self.sampleBus.dry.gain.setTargetAtTime(through ? 0 : 1, ctx.currentTime, 0.02);
+    }
     const horizon = ctx.currentTime + 0.08;
     while (self.audioOrigin + self.scheduledUntil < horizon) {
       const when = Math.max(self.audioOrigin + self.scheduledUntil, ctx.currentTime);
       const stepIndex = Math.floor(self.scheduledUntil / dur) % 16;
       if (self.audioOrigin + self.scheduledUntil >= ctx.currentTime - 0.02) {
         pattern.voices.forEach((voice, i) => hit(self.voices[i], voice, stepIndex, when, dur));
+        hitSample(stepIndex, when);
       }
       self.scheduledUntil += dur;
     }
@@ -329,6 +402,9 @@ function paintHead(index) {
     if (track.mute || track.steps[index] == null) return null;
     return track.name + " " + NOTES[track.steps[index]];
   }).filter(Boolean);
+  if (pattern.sample && !pattern.sample.mute && pattern.sample.steps[index]) {
+    sounding.push("Sample " + HIT_NAME[pattern.sample.steps[index]]);
+  }
   status.textContent = sounding.length ? sounding.join(" · ") : "This step is silent. The line keeps moving.";
 }
 function render() {
@@ -337,9 +413,9 @@ function render() {
   root.replaceChildren();
   const header = el("header");
   const titles = el("div");
-  titles.append(el("p", "kicker", "Three tracks, one clock"), el("h1", "", "SID-STEP"));
+  titles.append(el("p", "kicker", "Three tracks, plus samples"), el("h1", "", "SID-STEP"));
   const lead = el("p", "muted");
-  lead.textContent = "Tune, bass, and beat all run together. Choose a note, tap a pad to place it, tap it again to clear it.";
+  lead.textContent = "Tune, bass, and beat run together. Cutoff and resonance shape the filter. Tap a sample pad to cycle kick, snare, and hat.";
   titles.append(lead);
   const play = el("button", "play", eng.playing ? "Stop" : "Play");
   play.onclick = () => { if (eng.playing) eng.stop(); else eng.start(); render(); };
@@ -379,9 +455,53 @@ function render() {
     lane.append(name, scroll);
     board.append(lane);
   });
+  const sampleLane = el("div", "lane");
+  const sampleName = el("button", active === 3 ? "on" : "", "Sample");
+  sampleName.onclick = () => { active = 3; render(); };
+  const sampleScroll = el("div", "scroll");
+  const samplePads = el("div", "pads");
+  pattern.sample.steps.forEach((step, stepIndex) => {
+    const pad = el("button", "pad" + (step ? " filled" : "") + (head === stepIndex ? " now" : ""), step ? HIT_MARK[step] : "");
+    pad.dataset.step = String(stepIndex);
+    pad.setAttribute("aria-label", "Sample step " + (stepIndex + 1) + (step ? ", " + HIT_NAME[step] : ", empty"));
+    pad.onclick = () => {
+      active = 3;
+      const at = HITS.indexOf(step);
+      pattern.sample.steps[stepIndex] = HITS[(at + 1) % HITS.length];
+      save();
+      render();
+    };
+    samplePads.append(pad);
+  });
+  sampleScroll.append(samplePads);
+  sampleLane.append(sampleName, sampleScroll);
+  board.append(sampleLane);
 
-  const voice = pattern.voices[active];
   const editor = el("section", "card");
+  if (active === 3) {
+    const sample = pattern.sample;
+    const split = el("div", "split");
+    const who = el("div");
+    who.append(el("h2", "", "Sample"), el("p", "muted", "A one-shot row. It does not use up Tune, Bass, or Beat."));
+    const actions = el("div", "row");
+    const routed = el("button", sample.filter ? "on" : "", sample.filter ? "Filtered" : "Dry");
+    routed.onclick = () => { sample.filter = !sample.filter; save(); render(); };
+    const mute = el("button", sample.mute ? "" : "solid", sample.mute ? "Muted" : "On");
+    mute.onclick = () => { sample.mute = !sample.mute; save(); render(); };
+    const clear = el("button", "", "Clear");
+    clear.onclick = () => { sample.steps = empty(); save(); render(); };
+    actions.append(routed, mute, clear);
+    split.append(who, actions);
+    const loud = el("label", "slider");
+    const loudTop = document.createElement("span");
+    loudTop.append("Loudness");
+    const loudRange = document.createElement("input");
+    loudRange.type = "range"; loudRange.min = "0"; loudRange.max = "100"; loudRange.value = String(Math.round(sample.level * 100));
+    loudRange.oninput = () => { sample.level = Number(loudRange.value) / 100; save(); };
+    loud.append(loudTop, loudRange);
+    editor.append(split, el("p", "muted", "Tap a pad to cycle empty, kick, snare, hat. K, S, and H mark the hits. Dry keeps them out of the filter."), loud);
+  } else {
+  const voice = pattern.voices[active];
   const split = el("div", "split");
   const who = el("div");
   who.append(el("h2", "", voice.name), el("p", "muted", voice.blurb));
@@ -434,6 +554,7 @@ function render() {
   loudRange.oninput = () => { voice.level = Number(loudRange.value) / 100; save(); };
   loud.append(loudTop, loudRange);
   editor.append(notes, loud);
+  }
 
   const sliders = el("section", "card");
   const modes = el("div", "row");
@@ -446,8 +567,8 @@ function render() {
   sliders.append(modes, el("p", "muted", "Low, band, and high can be on together. Dry skips the filter. If none are on, filtered tracks go quiet."));
   const grid = el("div", "sliders");
   grid.append(slider("Speed", String(pattern.bpm), 60, 180, pattern.bpm, (v) => { pattern.bpm = v; save(); document.querySelector("#speed-hint").textContent = String(v); }, "speed-hint"));
-  grid.append(slider("Tone", "Dark to bright", 0, 100, Math.round(pattern.tone * 100), (v) => { pattern.tone = v / 100; save(); }));
-  grid.append(slider("Ring", "How much it sings", 0, 100, Math.round(pattern.ring * 100), (v) => { pattern.ring = v / 100; save(); }));
+  grid.append(slider("Cutoff", "Where the filter opens", 0, 100, Math.round(pattern.tone * 100), (v) => { pattern.tone = v / 100; save(); }));
+  grid.append(slider("Resonance", "How sharp the peak is", 0, 100, Math.round(pattern.ring * 100), (v) => { pattern.ring = v / 100; save(); }));
   grid.append(slider("Volume", "Loud or quiet", 0, 100, Math.round(pattern.volume * 100), (v) => { pattern.volume = v / 100; save(); }));
   sliders.append(grid);
 
@@ -456,7 +577,7 @@ function render() {
     const share = el("button", "", "Share pattern");
     share.onclick = () => {
       webxdc.sendUpdate({
-        payload: { v: 1, bpm: pattern.bpm, tone: pattern.tone, ring: pattern.ring, volume: pattern.volume, filter: pattern.filter, voices: pattern.voices },
+        payload: { v: 1, bpm: pattern.bpm, tone: pattern.tone, ring: pattern.ring, volume: pattern.volume, filter: pattern.filter, sample: pattern.sample, voices: pattern.voices },
         info: "SID pattern",
         summary: "SID-STEP",
         document: "SID-STEP"
@@ -501,6 +622,15 @@ function validPattern(payload) {
     if (voice.filter != null && typeof voice.filter !== "boolean") return false;
     if (!Array.isArray(voice.steps) || voice.steps.length !== 16) return false;
     if (voice.steps.some((step) => step !== null && (!Number.isInteger(step) || step < 0 || step > 7))) return false;
+  }
+  if (payload.sample != null) {
+    const sample = payload.sample;
+    const known = ["kick", "snare", "hat"];
+    if (!sample || !Array.isArray(sample.steps) || sample.steps.length !== 16) return false;
+    if (sample.steps.some((step) => step != null && !known.includes(step))) return false;
+    if (sample.level != null && (typeof sample.level !== "number" || sample.level < 0 || sample.level > 1)) return false;
+    if (sample.mute != null && typeof sample.mute !== "boolean") return false;
+    if (sample.filter != null && typeof sample.filter !== "boolean") return false;
   }
   return true;
 }
