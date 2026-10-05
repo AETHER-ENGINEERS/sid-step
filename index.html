@@ -454,10 +454,12 @@ window.addEventListener("keydown", (event) => {
 });
 if (window.webxdc && typeof webxdc.setUpdateListener === "function") {
   webxdc.setUpdateListener((update) => {
-    if (!validPattern(update && update.payload)) return;
-    pattern = update.payload;
-    save();
-    render();
+    try {
+      if (!validPattern(update && update.payload)) return;
+      pattern = update.payload;
+      save();
+      render();
+    } catch (e) {}
   }, 0);
 }
 render();

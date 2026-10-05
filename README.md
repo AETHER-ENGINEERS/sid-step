@@ -12,7 +12,8 @@ Older builds stay in [archive/](archive/) so each step is still there:
 | [archive/sid-step-0.0.2.xdc](archive/sid-step-0.0.2.xdc) | Three lanes and note names. Second press of Play scheduled the bar into the future. |
 | [archive/sid-step-0.0.3.xdc](archive/sid-step-0.0.3.xdc) | Play survives stop and start. Shared patterns are checked. Hollow-wave cache never hit. |
 | [archive/sid-step-0.0.4.xdc](archive/sid-step-0.0.4.xdc) | Saved patterns use the same checks as shared ones. The hollow-wave cache keys on the width. The `webxdc.js` tag was dropped by mistake. |
-| [sid-step.xdc](sid-step.xdc) | 0.0.5. Current. The script tag is back, which is what turns the messenger API on. Pitch can use the full 24-bit SID register. |
+| [archive/sid-step-0.0.5.xdc](archive/sid-step-0.0.5.xdc) | Script tag restored. Full 24-bit pitch register. `version` is already in the manifest. |
+| [sid-step.xdc](sid-step.xdc) | 0.0.6. Current. A bad shared pattern cannot throw out of the update listener. |
 
 Press Play. The bright column moves across all three lanes. Pick a note letter, tap a pad to place it, tap it again to clear it.
 
