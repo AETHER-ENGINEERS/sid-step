@@ -1,2 +1,4 @@
 name = "SID-STEP"
 source_code_url = "https://github.com/AETHER-ENGINEERS/sid-step"
+min_api = 1
+min_platform_version = 1
