@@ -38,7 +38,8 @@ Latest timestamp wins. Not an SPDX replacement. No profit or proprietary enclosu
   .pad.now:not(.filled) { border-color: var(--fg); background: var(--surface-2); color: var(--fg); }
   .split { display: flex; justify-content: space-between; gap: 0.8rem; align-items: flex-start; }
   .sliders { display: grid; gap: 0.8rem; }
-  @media (min-width: 720px) { .sliders { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 720px) { .sliders { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 960px) { .sliders { grid-template-columns: repeat(4, 1fr); } }
   label.slider { display: flex; flex-direction: column; gap: 0.25rem; color: var(--fg); font-size: 0.92rem; }
   label.slider span { display: flex; justify-content: space-between; }
   label.slider em { color: var(--muted); font-style: normal; }
@@ -204,7 +205,7 @@ function createEngine() {
     if (voice.mute || degree == null || !slot.node) { gain.setValueAtTime(0, when); return; }
     const hz = sidHz(midiFor(voice.octave, degree));
     if (slot.node.frequency) slot.node.frequency.setValueAtTime(hz, when);
-    else slot.node.playbackRate.setValueAtTime(Math.max(0.08, hz / (voice.wave === "drum" ? 160 : 220)), when);
+    else slot.node.playbackRate.setValueAtTime(Math.max(0.08, hz / 160), when);
     const peak = 0.28 * voice.level;
     const attack = voice.wave === "drum" ? 0.002 : 0.004;
     const release = voice.wave === "drum" ? Math.min(0.05, dur * 0.45) : 0.012;
@@ -394,6 +395,7 @@ function render() {
   sliders.append(slider("Speed", String(pattern.bpm), 60, 180, pattern.bpm, (v) => { pattern.bpm = v; save(); document.querySelector("#speed-hint").textContent = String(v); }, "speed-hint"));
   sliders.append(slider("Tone", "Dark to bright", 0, 100, Math.round(pattern.tone * 100), (v) => { pattern.tone = v / 100; save(); }));
   sliders.append(slider("Ring", "How much it sings", 0, 100, Math.round(pattern.ring * 100), (v) => { pattern.ring = v / 100; save(); }));
+  sliders.append(slider("Volume", "Loud or quiet", 0, 100, Math.round(pattern.volume * 100), (v) => { pattern.volume = v / 100; save(); }));
 
   const shareRow = el("div", "row");
   if (window.webxdc && typeof webxdc.sendUpdate === "function") {
@@ -449,8 +451,10 @@ window.addEventListener("keydown", (event) => {
   const tag = event.target && event.target.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON") return;
   event.preventDefault();
-  if (eng.playing) eng.stop(); else eng.start();
-  render();
+  try {
+    if (eng.playing) eng.stop(); else eng.start();
+    render();
+  } catch (e) {}
 });
 if (window.webxdc && typeof webxdc.setUpdateListener === "function") {
   webxdc.setUpdateListener((update) => {
