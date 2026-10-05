@@ -16,7 +16,8 @@ Older builds stay in [archive/](archive/) so each step is still there:
 | [archive/sid-step-0.0.6.xdc](archive/sid-step-0.0.6.xdc) | Update listener cannot be torn down by a bad pattern. No master volume control. |
 | [archive/sid-step-0.0.7.xdc](archive/sid-step-0.0.7.xdc) | Master volume. One lowpass shared by every track. |
 | [archive/sid-step-0.0.8.xdc](archive/sid-step-0.0.8.xdc) | Low, band, and high. Cutoff and resonance were still labeled Tone and Ring. No sample row. |
-| [sid-step.xdc](sid-step.xdc) | 0.0.9. Current. Cutoff and resonance are named. A sample row plays kick, snare, and hat without using a SID voice. |
+| [archive/sid-step-0.0.9.xdc](archive/sid-step-0.0.9.xdc) | Cutoff, resonance, and a sample row. The screen stayed black because a pitch label was missing. |
+| [sid-step.xdc](sid-step.xdc) | 0.0.10. Current. Same as 0.0.9, and the screen draws. |
 
 Press Play. The bright column moves across all three lanes. Pick a note letter, tap a pad to place it, tap it again to clear it.
 
