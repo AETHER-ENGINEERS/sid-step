@@ -10,362 +10,418 @@ Full text in LICENSE. Canonical: https://github.com/AETHER-ENGINEERS/AETHER-ENGI
 Latest timestamp wins. Not an SPDX replacement. No profit or proprietary enclosure of this implementation.
 -->
 <style>
-  :root { --bg:#2020a0; --screen:#1d1d5c; --ink:#8f8fe0; --on:#43b451; --rest:#2a2a6a; --key:#16164a; }
+  :root {
+    --bg: #14120f; --surface: #221f1a; --surface-2: #2c2822;
+    --fg: #f4efe6; --muted: #a3988c; --accent: #e39b3a; --ink: #1a1206; --line: #3a342c;
+  }
   * { box-sizing: border-box; }
-  html, body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.3 ui-monospace, "Courier New", monospace; }
-  main { max-width:720px; margin:0 auto; padding:12px; }
-  h1 { margin:0 0 8px; font-size:18px; letter-spacing:2px; color:var(--on); }
-  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; }
-  button, .key { background:var(--key); color:var(--ink); border:2px solid var(--ink); min-height:44px; padding:6px 10px; font:inherit; }
-  button.on, .wave.on { background:var(--on); color:#102010; border-color:var(--on); }
-  button:disabled { opacity:.4; }
-  .grid { display:grid; grid-template-columns:72px repeat(16, 1fr); gap:3px; margin:10px 0; }
-  .cell { min-height:44px; background:var(--rest); border:1px solid #3a3a88; color:var(--ink); font-size:11px; }
-  .cell.hit { background:var(--on); color:#102010; }
-  .cell.play { outline:2px solid #d0d070; }
-  label { display:flex; flex-direction:column; gap:2px; font-size:11px; min-width:88px; }
-  input[type=range] { width:100%; }
-  .hex { color:#d0d070; }
-  .voicebar { display:flex; gap:4px; align-items:center; margin:4px 0; }
+  html, body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.45 "Segoe UI", "Avenir Next", sans-serif; }
+  main { max-width: 64rem; margin: 0 auto; padding: 1.25rem 1rem 2.5rem; display: flex; flex-direction: column; gap: 1.1rem; }
+  h1 { font-family: Georgia, "Iowan Old Style", serif; font-size: 2.6rem; line-height: 1; margin: 0; font-weight: 500; }
+  h2 { font-family: Georgia, "Iowan Old Style", serif; font-size: 1.6rem; line-height: 1; margin: 0; font-weight: 500; }
+  .kicker { letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent); font-size: 0.75rem; margin: 0 0 0.4rem; }
+  .muted { color: var(--muted); }
+  header { display: flex; flex-wrap: wrap; gap: 1rem; align-items: flex-end; justify-content: space-between; }
+  button, input[type="range"] { font: inherit; }
+  button { cursor: pointer; min-height: 2.75rem; border-radius: 0.7rem; border: 1px solid var(--line); background: transparent; color: var(--fg); padding: 0 0.8rem; }
+  button.play { background: var(--accent); color: var(--ink); border-color: var(--accent); font-weight: 650; padding: 0 1.4rem; border-radius: 0.85rem; }
+  button.on { background: var(--accent); color: var(--ink); border-color: var(--accent); font-weight: 650; }
+  button.solid { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 650; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 1rem; padding: 0.9rem; }
+  .row { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+  .lane { display: grid; grid-template-columns: 4.75rem 1fr; gap: 0.45rem; align-items: center; margin-top: 0.45rem; }
+  .pads { display: grid; grid-template-columns: repeat(16, 2.75rem); gap: 0.25rem; width: max-content; }
+  .scroll { overflow-x: auto; }
+  .pad { min-width: 2.75rem; padding: 0; font-weight: 650; }
+  .pad.filled { background: var(--accent); color: var(--ink); border-color: var(--accent); }
+  .pad.now.filled { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+  .pad.now:not(.filled) { border-color: var(--fg); background: var(--surface-2); color: var(--fg); }
+  .split { display: flex; justify-content: space-between; gap: 0.8rem; align-items: flex-start; }
+  .sliders { display: grid; gap: 0.8rem; }
+  @media (min-width: 720px) { .sliders { grid-template-columns: repeat(3, 1fr); } }
+  label.slider { display: flex; flex-direction: column; gap: 0.25rem; color: var(--fg); font-size: 0.92rem; }
+  label.slider span { display: flex; justify-content: space-between; }
+  label.slider em { color: var(--muted); font-style: normal; }
+  input[type="range"] { width: 100%; accent-color: var(--accent); }
+  .tiny { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
 </style>
 <script src="webxdc.js"></script>
 </head>
 <body>
-<main>
-  <h1>SID-STEP</h1>
-  <div class="row">
-    <button id="play" type="button">PLAY</button>
-    <button id="share" type="button">SHARE</button>
-    <button id="wav" type="button">EXPORT WAV</button>
-    <span id="status" class="hex">STOPPED</span>
-  </div>
-  <div id="grid" class="grid"></div>
-  <div id="voices"></div>
-  <div class="row">
-    <label>CUTOFF <input id="cutoff" type="range" min="0" max="100" value="65"><span id="cuthex" class="hex">$000</span></label>
-    <label>RES <input id="res" type="range" min="0" max="100" value="40"><span id="qhex" class="hex">Q 0.7</span></label>
-    <label>VOL <input id="vol" type="range" min="0" max="100" value="70"></label>
-    <label>BPM <input id="bpm" type="range" min="60" max="200" value="120"><span id="bpmv">120</span></label>
-  </div>
-  <div class="hex" id="regs">V1 $0000 · V2 $0000 · V3 $0000</div>
-</main>
+<main id="app"></main>
 <script>
 const FCLK = 985248;
-const WAVES = ["pulse", "saw", "triangle", "noise"];
-const DEFAULT = {
-  v: 1, bpm: 120, cutoff: 0.65, resonance: 0.4, volume: 0.7,
-  voices: [
-    { wave: "saw", octave: 0, pulse: 8, steps: [0,-1,-1,-1, 7,-1,-1,-1, 12,-1,-1,-1, 7,-1,-1,-1] },
-    { wave: "pulse", octave: -1, pulse: 3, steps: [0,-1,-1,0, -1,-1,0,-1, 0,-1,-1,0, -1,-1,0,-1] },
-    { wave: "noise", octave: 0, pulse: 0, steps: [0,-1,-1,-1, -1,-1,-1,-1, 0,-1,-1,-1, -1,-1,-1,-1] }
-  ]
+const NOTES = ["C", "D", "E", "F", "G", "A", "B", "C+"];
+const SEMI = [0, 2, 4, 5, 7, 9, 11, 12];
+const WAVES = ["soft", "bright", "hollow", "drum"];
+const WAVE_HELP = {
+  soft: ["Soft", "Round, like a flute"],
+  bright: ["Bright", "Buzzy, the classic chip tone"],
+  hollow: ["Hollow", "Thin and nasal. Width changes the color"],
+  drum: ["Beat", "A tick. Higher notes are tighter"]
 };
-let pattern = loadLocal() || structuredClone(DEFAULT);
-const $ = (id) => document.getElementById(id);
-let ctx, mixer, filter, master, voices = [], noiseBuf, playing = false, step = 0, nextTime = 0, timer = 0;
-const pulseCache = new Map();
+const OCTAVE_HELP = { "-1": "Low", "0": "Mid", "1": "High" };
+const STORE = "sid-step-ui-v2";
 
-function fnFromHz(hz) { return Math.max(0, Math.min(65535, Math.round(hz * 16777216 / FCLK))); }
-function hzFromFn(fn) { return fn * FCLK / 16777216; }
-function midiHz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
-function voiceHz(v, offset) {
-  const midi = 60 + v.octave * 12 + offset;
-  return hzFromFn(fnFromHz(midiHz(midi)));
+function empty() { return Array(16).fill(null); }
+function voice(id, name, blurb, wave, octave, pulse, level, steps) {
+  return { id, name, blurb, wave, octave, pulse, level, mute: false, steps: steps.slice() };
 }
-function hex4(n) { return "$" + n.toString(16).toUpperCase().padStart(4, "0"); }
-function cutHz(p) { return 80 * Math.pow(8000 / 80, p); }
-function qOf(p) { return 0.7 + p * (18 - 0.7); }
+function presetTogether() {
+  return {
+    bpm: 108, tone: 0.62, ring: 0.28, volume: 0.85,
+    voices: [
+      voice("tune", "Tune", "The melody on top", "soft", 0, 8, 0.75, [0,null,2,null,4,null,2,null,7,null,4,null,2,null,0,null]),
+      voice("bass", "Bass", "The low line underneath", "bright", -1, 4, 0.6, [0,null,null,null,0,null,3,null,4,null,null,null,3,null,0,null]),
+      voice("beat", "Beat", "The rhythm. Higher notes tick tighter", "drum", 0, 8, 0.45, [0,null,2,null,0,null,4,null,0,null,2,null,0,4,null,2])
+    ]
+  };
+}
+function presetBass() {
+  return {
+    bpm: 96, tone: 0.45, ring: 0.4, volume: 0.85,
+    voices: [
+      voice("tune", "Tune", "The melody on top", "soft", 1, 8, 0.5, empty()),
+      voice("bass", "Bass", "The low line underneath", "bright", -1, 6, 0.8, [0,0,2,2,4,4,3,3,5,5,4,3,2,2,0,0]),
+      voice("beat", "Beat", "The rhythm. Higher notes tick tighter", "drum", 0, 8, 0.35, [0,null,null,2,null,null,0,null,0,null,null,4,null,2,null,null])
+    ]
+  };
+}
+function presetEmpty() {
+  return {
+    bpm: 110, tone: 0.55, ring: 0.2, volume: 0.85,
+    voices: [
+      voice("tune", "Tune", "The melody on top", "soft", 0, 8, 0.7, empty()),
+      voice("bass", "Bass", "The low line underneath", "bright", -1, 5, 0.6, empty()),
+      voice("beat", "Beat", "The rhythm. Higher notes tick tighter", "drum", 0, 8, 0.45, empty())
+    ]
+  };
+}
+const PRESETS = [
+  ["together", "All three", presetTogether],
+  ["bassline", "Bass walk", presetBass],
+  ["blank", "Empty", presetEmpty]
+];
 
-function loadLocal() {
-  try { const s = localStorage.getItem("sid-step-v1"); return s ? JSON.parse(s) : null; } catch (e) { return null; }
+function sidHz(midi) {
+  const hz = 440 * 2 ** ((midi - 69) / 12);
+  const fn = Math.max(0, Math.min(65535, Math.round(hz * 16777216 / FCLK)));
+  return fn * FCLK / 16777216;
 }
-function saveLocal() { try { localStorage.setItem("sid-step-v1", JSON.stringify(pattern)); } catch (e) {} }
+function midiFor(octave, degree) { return 60 + octave * 12 + SEMI[degree]; }
 
-function render() {
-  const g = $("grid");
-  g.innerHTML = "";
-  const head = document.createElement("div");
-  head.textContent = "";
-  g.appendChild(head);
-  for (let s = 0; s < 16; s++) {
-    const h = document.createElement("div");
-    h.textContent = s + 1;
-    h.style.textAlign = "center";
-    g.appendChild(h);
-  }
-  pattern.voices.forEach((v, vi) => {
-    const lab = document.createElement("div");
-    lab.textContent = "V" + (vi + 1);
-    g.appendChild(lab);
-    v.steps.forEach((st, si) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "cell" + (st >= 0 ? " hit" : "") + (playing && si === step ? " play" : "");
-      b.textContent = st < 0 ? "·" : st;
-      b.onclick = () => { v.steps[si] = st < 0 ? 0 : st >= 15 ? -1 : st + 1; saveLocal(); render(); };
-      g.appendChild(b);
-    });
-  });
-  const box = $("voices");
-  box.innerHTML = "";
-  pattern.voices.forEach((v, vi) => {
-    const bar = document.createElement("div");
-    bar.className = "voicebar";
-    WAVES.forEach((w) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "wave" + (v.wave === w ? " on" : "");
-      b.textContent = w.slice(0, 3).toUpperCase();
-      b.onclick = () => { v.wave = w; saveLocal(); render(); };
-      bar.appendChild(b);
-    });
-    const oct = document.createElement("button");
-    oct.type = "button";
-    oct.textContent = "OCT " + v.octave;
-    oct.onclick = () => { v.octave = v.octave >= 2 ? -2 : v.octave + 1; saveLocal(); render(); };
-    bar.appendChild(oct);
-    const pw = document.createElement("button");
-    pw.type = "button";
-    pw.textContent = "PW " + v.pulse;
-    pw.disabled = v.wave !== "pulse";
-    pw.onclick = () => { v.pulse = v.pulse >= 15 ? 1 : v.pulse + 1; saveLocal(); render(); };
-    bar.appendChild(pw);
-    box.appendChild(bar);
-  });
-  $("cutoff").value = Math.round(pattern.cutoff * 100);
-  $("res").value = Math.round(pattern.resonance * 100);
-  $("vol").value = Math.round(pattern.volume * 100);
-  $("bpm").value = pattern.bpm;
-  $("bpmv").textContent = pattern.bpm;
-  const creg = Math.round(pattern.cutoff * 0x7ff);
-  $("cuthex").textContent = "$" + creg.toString(16).toUpperCase().padStart(3, "0");
-  $("qhex").textContent = "Q " + qOf(pattern.resonance).toFixed(1);
-  $("share").disabled = !(window.webxdc && typeof webxdc.sendUpdate === "function");
-}
+let pattern = load();
+let picked = [0, 0, 0];
+let active = 0;
+let head = null;
+const eng = createEngine();
 
-function pulseWave(dutyN) {
-  const d = Math.max(1, Math.min(15, dutyN)) / 16;
-  if (pulseCache.has(d)) return pulseCache.get(d);
-  const real = new Float32Array(32), imag = new Float32Array(32);
-  for (let n = 1; n < 32; n++) imag[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * d);
-  const w = ctx.createPeriodicWave(real, imag);
-  pulseCache.set(d, w);
-  return w;
-}
-function makeNoise(ac) {
-  const n = ac.sampleRate;
-  const buf = ac.createBuffer(1, n, ac.sampleRate);
-  const data = buf.getChannelData(0);
-  let lfsr = 0x7ffff;
-  for (let i = 0; i < n; i++) {
-    const bit = ((lfsr >> 22) ^ (lfsr >> 17)) & 1;
-    lfsr = ((lfsr << 1) | bit) & 0x7fffff;
-    data[i] = (lfsr & 1) ? 0.8 : -0.8;
-  }
-  return buf;
-}
-function applyFilter(acFilter, acMaster) {
-  acFilter.frequency.setTargetAtTime(cutHz(pattern.cutoff), acFilter.context.currentTime, 0.01);
-  acFilter.Q.setTargetAtTime(qOf(pattern.resonance), acFilter.context.currentTime, 0.01);
-  acMaster.gain.setTargetAtTime(pattern.volume, acMaster.context.currentTime, 0.01);
-}
-function boot() {
-  if (ctx) return;
-  ctx = new AudioContext();
-  noiseBuf = makeNoise(ctx);
-  mixer = ctx.createGain();
-  filter = ctx.createBiquadFilter();
-  filter.type = "lowpass";
-  master = ctx.createGain();
-  mixer.connect(filter); filter.connect(master); master.connect(ctx.destination);
-  voices = [0, 1, 2].map(() => {
-    const g = ctx.createGain();
-    g.gain.value = 0;
-    g.connect(mixer);
-    return { gain: g, node: null, wave: null, pulse: null };
-  });
-  applyFilter(filter, master);
-}
-function retarget(v, wave, pulse, when) {
-  if (v.wave === wave && (wave !== "pulse" || v.pulse === pulse) && v.node) return;
-  if (v.node) { try { v.node.stop(when); } catch (e) {} v.node.disconnect(); v.node = null; }
-  let node;
-  if (wave === "noise") {
-    node = ctx.createBufferSource();
-    node.buffer = noiseBuf;
-    node.loop = true;
-  } else {
-    node = ctx.createOscillator();
-    if (wave === "pulse") node.setPeriodicWave(pulseWave(pulse || 8));
-    else node.type = wave === "saw" ? "sawtooth" : "triangle";
-  }
-  node.connect(v.gain);
-  node.start(when);
-  v.node = node; v.wave = wave; v.pulse = pulse;
-}
-function schedule(when, si) {
-  const dur = 60 / pattern.bpm / 4;
-  pattern.voices.forEach((pv, i) => {
-    const v = voices[i];
-    retarget(v, pv.wave, pv.pulse, when);
-    const off = pv.steps[si];
-    const g = v.gain.gain;
-    g.cancelScheduledValues(when);
-    if (off < 0) {
-      g.setValueAtTime(0, when);
-      return;
-    }
-    const hz = voiceHz(pv, off);
-    if (v.node.frequency) v.node.frequency.setValueAtTime(hz, when);
-    else v.node.playbackRate.setValueAtTime(Math.max(0.05, hz / 440), when);
-    g.setValueAtTime(0, when);
-    g.linearRampToValueAtTime(0.3, when + 0.004);
-    g.setValueAtTime(0.3, when + Math.max(0.004, dur - 0.008));
-    g.linearRampToValueAtTime(0, when + dur);
-  });
-  const regs = pattern.voices.map((pv, i) => {
-    const off = pv.steps[si];
-    return "V" + (i + 1) + " " + (off < 0 ? "$----" : hex4(fnFromHz(voiceHz(pv, off))));
-  }).join(" · ");
-  setTimeout(() => { if (playing) { $("regs").textContent = regs; step = si; } }, Math.max(0, (when - ctx.currentTime) * 1000));
-}
-function tick() {
-  while (nextTime < ctx.currentTime + 0.025) {
-    schedule(nextTime, step);
-    nextTime += 60 / pattern.bpm / 4;
-    step = (step + 1) % 16;
-  }
-}
-async function toggle() {
-  boot();
-  if (ctx.state === "suspended") await ctx.resume();
-  playing = !playing;
-  $("play").textContent = playing ? "STOP" : "PLAY";
-  $("play").classList.toggle("on", playing);
-  $("status").textContent = playing ? "RUN" : "STOPPED";
-  if (playing) {
-    step = 0;
-    nextTime = ctx.currentTime + 0.05;
-    tick();
-    timer = setInterval(tick, 50);
-  } else {
-    clearInterval(timer);
-    voices.forEach((v) => v.gain.gain.cancelScheduledValues(ctx.currentTime));
-    voices.forEach((v) => v.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.01));
-  }
-}
-function readControls() {
-  pattern.cutoff = $("cutoff").value / 100;
-  pattern.resonance = $("res").value / 100;
-  pattern.volume = $("vol").value / 100;
-  pattern.bpm = +$("bpm").value;
-  saveLocal();
-  render();
-  if (ctx) applyFilter(filter, master);
-}
-function share() {
-  if (!window.webxdc || typeof webxdc.sendUpdate !== "function") return;
-  webxdc.sendUpdate({
-    payload: pattern,
-    info: "SID pattern",
-    summary: "SID-STEP",
-    document: "SID-STEP"
-  }, "");
-}
-function encodeWav(samples, rate) {
-  const n = samples.length;
-  const buf = new ArrayBuffer(44 + n * 2);
-  const view = new DataView(buf);
-  const w = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
-  w(0, "RIFF"); view.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt ");
-  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
-  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
-  w(36, "data"); view.setUint32(40, n * 2, true);
-  for (let i = 0; i < n; i++) {
-    const s = Math.max(-1, Math.min(1, samples[i]));
-    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-  }
-  return buf;
-}
-function download(b64) {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
-  a.download = "sid-step.wav";
-  a.click();
-}
-async function exportWav() {
-  $("status").textContent = "RENDER";
-  const rate = 44100;
-  const dur = 60 / pattern.bpm / 4;
-  const off = new OfflineAudioContext(1, Math.ceil(rate * dur * 16) + rate, rate);
-  const nb = makeNoise(off);
-  const mix = off.createGain(), fil = off.createBiquadFilter(), mas = off.createGain();
-  fil.type = "lowpass";
-  fil.frequency.value = cutHz(pattern.cutoff);
-  fil.Q.value = qOf(pattern.resonance);
-  mas.gain.value = pattern.volume;
-  mix.connect(fil); fil.connect(mas); mas.connect(off.destination);
-  const nodes = pattern.voices.map((pv) => {
-    const g = off.createGain(); g.gain.value = 0; g.connect(mix);
-    let node;
-    if (pv.wave === "noise") { node = off.createBufferSource(); node.buffer = nb; node.loop = true; }
-    else {
-      node = off.createOscillator();
-      if (pv.wave === "pulse") {
-        const d = Math.max(1, pv.pulse) / 16;
-        const real = new Float32Array(32), imag = new Float32Array(32);
-        for (let n = 1; n < 32; n++) imag[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * d);
-        node.setPeriodicWave(off.createPeriodicWave(real, imag));
-      } else node.type = pv.wave === "saw" ? "sawtooth" : "triangle";
-    }
-    node.connect(g); node.start(0);
-    return { node, g, pv };
-  });
-  for (let s = 0; s < 16; s++) {
-    const when = s * dur;
-    nodes.forEach(({ node, g, pv }) => {
-      const offst = pv.steps[s];
-      const gain = g.gain;
-      if (offst < 0) { gain.setValueAtTime(0, when); return; }
-      const hz = voiceHz(pv, offst);
-      if (node.frequency) node.frequency.setValueAtTime(hz, when);
-      else node.playbackRate.setValueAtTime(Math.max(0.05, hz / 440), when);
-      gain.setValueAtTime(0, when);
-      gain.linearRampToValueAtTime(0.3, when + 0.004);
-      gain.setValueAtTime(0.3, when + Math.max(0.004, dur - 0.008));
-      gain.linearRampToValueAtTime(0, when + dur);
-    });
-  }
-  const audio = await off.startRendering();
-  const raw = audio.getChannelData(0);
-  const pcm = encodeWav(raw, rate);
-  let bin = "";
-  const bytes = new Uint8Array(pcm);
-  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-  const b64 = btoa(bin);
+function load() {
   try {
-    if (!window.webxdc || typeof webxdc.sendToChat !== "function") return download(b64);
-    await webxdc.sendToChat({ file: { base64: b64, name: "sid-step.wav" }, text: "SID-STEP one bar" });
-  } catch (e) { download(b64); }
-  $("status").textContent = playing ? "RUN" : "STOPPED";
+    const raw = localStorage.getItem(STORE);
+    const parsed = raw && JSON.parse(raw);
+    if (parsed && parsed.voices && parsed.voices.length === 3 && parsed.voices.every((v) => v.steps && v.steps.length === 16)) return parsed;
+  } catch (e) {}
+  return presetTogether();
 }
-function applyRemote(p) {
-  if (!p || p.v !== 1 || !Array.isArray(p.voices)) return;
-  pattern = p;
-  saveLocal();
+function save() { try { localStorage.setItem(STORE, JSON.stringify(pattern)); } catch (e) {} }
+
+function createEngine() {
+  const self = {
+    ctx: null, filter: null, master: null, noise: null, voices: [], waves: new Map(),
+    timer: 0, origin: 0, audioOrigin: null, scheduledUntil: 0, playing: false
+  };
+  function toneHz(amount) { return 140 * (7000 / 140) ** Math.min(1, Math.max(0, amount)); }
+  function ringQ(amount) { return 0.7 + Math.min(1, Math.max(0, amount)) * 12; }
+  function makeNoise(ctx) {
+    const buf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    let lfsr = 0x7ffff;
+    for (let i = 0; i < data.length; i++) {
+      const bit = ((lfsr >> 22) ^ (lfsr >> 17)) & 1;
+      lfsr = ((lfsr << 1) | bit) & 0x7fffff;
+      data[i] = lfsr & 1 ? 0.85 : -0.85;
+    }
+    return buf;
+  }
+  function boot() {
+    if (self.ctx) return;
+    const ctx = new AudioContext();
+    self.ctx = ctx;
+    self.noise = makeNoise(ctx);
+    const mixer = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    filter.type = "lowpass";
+    const master = ctx.createGain();
+    mixer.connect(filter); filter.connect(master); master.connect(ctx.destination);
+    self.filter = filter; self.master = master;
+    self.voices = [0, 1, 2].map(() => {
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      gain.connect(mixer);
+      return { gain, node: null, wave: null, pulse: 0 };
+    });
+  }
+  function pulseWave(ctx, duty) {
+    const d = Math.max(1, Math.min(15, duty)) / 16;
+    if (self.waves.has(d) && ctx === self.ctx) return self.waves.get(d);
+    const real = new Float32Array(32), imag = new Float32Array(32);
+    for (let n = 1; n < 32; n++) imag[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * d);
+    const wave = ctx.createPeriodicWave(real, imag);
+    if (ctx === self.ctx) self.waves.set(d, wave);
+    return wave;
+  }
+  function ensure(slot, wave, pulse, when) {
+    const ctx = self.ctx;
+    if (slot.node && slot.wave === wave && (wave !== "hollow" || slot.pulse === pulse)) return;
+    if (slot.node) { try { slot.node.stop(when); } catch (e) {} slot.node.disconnect(); slot.node = null; }
+    let node;
+    if (wave === "drum") {
+      node = ctx.createBufferSource();
+      node.buffer = self.noise;
+      node.loop = true;
+    } else {
+      node = ctx.createOscillator();
+      if (wave === "hollow") node.setPeriodicWave(pulseWave(ctx, pulse));
+      else node.type = wave === "bright" ? "sawtooth" : "triangle";
+    }
+    node.connect(slot.gain);
+    node.start(when);
+    slot.node = node; slot.wave = wave; slot.pulse = pulse;
+  }
+  function hit(slot, voice, stepIndex, when, dur) {
+    ensure(slot, voice.wave, voice.pulse, when);
+    const degree = voice.steps[stepIndex];
+    const gain = slot.gain.gain;
+    gain.cancelScheduledValues(when);
+    if (voice.mute || degree == null || !slot.node) { gain.setValueAtTime(0, when); return; }
+    const hz = sidHz(midiFor(voice.octave, degree));
+    if (slot.node.frequency) slot.node.frequency.setValueAtTime(hz, when);
+    else slot.node.playbackRate.setValueAtTime(Math.max(0.08, hz / (voice.wave === "drum" ? 160 : 220)), when);
+    const peak = 0.28 * voice.level;
+    const attack = voice.wave === "drum" ? 0.002 : 0.004;
+    const release = voice.wave === "drum" ? Math.min(0.05, dur * 0.45) : 0.012;
+    gain.setValueAtTime(0, when);
+    gain.linearRampToValueAtTime(peak, when + attack);
+    gain.setValueAtTime(peak, when + Math.max(attack, dur - release));
+    gain.linearRampToValueAtTime(0, when + dur);
+  }
+  function tick() {
+    if (!self.playing || !self.ctx) return;
+    const dur = 60 / pattern.bpm / 4;
+    const elapsed = (performance.now() - self.origin) / 1000;
+    paintHead(Math.floor(elapsed / dur) % 16);
+    const ctx = self.ctx;
+    if (ctx.state !== "running") return;
+    if (self.audioOrigin == null) self.audioOrigin = ctx.currentTime - elapsed;
+    self.filter.frequency.setTargetAtTime(toneHz(pattern.tone), ctx.currentTime, 0.03);
+    self.filter.Q.setTargetAtTime(ringQ(pattern.ring), ctx.currentTime, 0.03);
+    self.master.gain.setTargetAtTime(pattern.volume, ctx.currentTime, 0.03);
+    const horizon = ctx.currentTime + 0.08;
+    while (self.scheduledUntil < horizon) {
+      const when = Math.max(self.audioOrigin + self.scheduledUntil, ctx.currentTime);
+      const stepIndex = Math.floor(self.scheduledUntil / dur) % 16;
+      if (self.audioOrigin + self.scheduledUntil >= ctx.currentTime - 0.02) {
+        pattern.voices.forEach((voice, i) => hit(self.voices[i], voice, stepIndex, when, dur));
+      }
+      self.scheduledUntil += dur;
+    }
+  }
+  self.start = function () {
+    boot();
+    if (self.playing) return;
+    self.playing = true;
+    self.origin = performance.now();
+    self.audioOrigin = null;
+    self.scheduledUntil = 0;
+    void self.ctx.resume();
+    tick();
+    self.timer = setInterval(tick, 40);
+  };
+  self.stop = function () {
+    self.playing = false;
+    clearInterval(self.timer);
+    self.audioOrigin = null;
+    if (!self.ctx) return;
+    const now = self.ctx.currentTime;
+    self.voices.forEach((v) => { v.gain.gain.cancelScheduledValues(now); v.gain.gain.setTargetAtTime(0, now, 0.02); });
+    paintHead(null);
+  };
+  return self;
+}
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+}
+function paintHead(index) {
+  head = index;
+  document.querySelectorAll("[data-step]").forEach((btn) => {
+    btn.classList.toggle("now", Number(btn.dataset.step) === index);
+  });
+  const status = document.getElementById("status");
+  if (!status) return;
+  if (!eng.playing || index == null) {
+    status.textContent = "Press Play. The bright column is the playhead.";
+    return;
+  }
+  const sounding = pattern.voices.map((track) => {
+    if (track.mute || track.steps[index] == null) return null;
+    return track.name + " " + NOTES[track.steps[index]];
+  }).filter(Boolean);
+  status.textContent = sounding.length ? sounding.join(" · ") : "This step is silent. The line keeps moving.";
+}
+function render() {
+  const root = document.getElementById("app");
+  root.replaceChildren();
+  const header = el("header");
+  const titles = el("div");
+  titles.append(el("p", "kicker", "Three tracks, one clock"), el("h1", "", "SID-STEP"));
+  const lead = el("p", "muted");
+  lead.textContent = "Tune, bass, and beat all run together. Choose a note, tap a pad to place it, tap it again to clear it.";
+  titles.append(lead);
+  const play = el("button", "play", eng.playing ? "Stop" : "Play");
+  play.onclick = () => { if (eng.playing) eng.stop(); else eng.start(); render(); };
+  header.append(titles, play);
+
+  const board = el("section", "card");
+  const presets = el("div", "row");
+  PRESETS.forEach(([id, name, factory]) => {
+    const b = el("button", "", name);
+    b.onclick = () => { pattern = factory(); picked = [0, 0, 0]; save(); render(); };
+    presets.append(b);
+  });
+  const status = el("p", "muted");
+  status.id = "status";
+  presets.append(status);
+  board.append(presets);
+  pattern.voices.forEach((track, voiceIndex) => {
+    const lane = el("div", "lane");
+    const name = el("button", voiceIndex === active ? "on" : "", track.name);
+    name.onclick = () => { active = voiceIndex; render(); };
+    const scroll = el("div", "scroll");
+    const pads = el("div", "pads");
+    track.steps.forEach((step, stepIndex) => {
+      const pad = el("button", "pad" + (step != null ? " filled" : "") + (head === stepIndex ? " now" : ""), step != null ? NOTES[step] : "");
+      pad.dataset.step = String(stepIndex);
+      pad.setAttribute("aria-label", track.name + " step " + (stepIndex + 1) + (step != null ? ", " + NOTES[step] : ", empty"));
+      pad.onclick = () => {
+        active = voiceIndex;
+        const choice = picked[voiceIndex];
+        track.steps[stepIndex] = track.steps[stepIndex] === choice ? null : choice;
+        save();
+        render();
+      };
+      pads.append(pad);
+    });
+    scroll.append(pads);
+    lane.append(name, scroll);
+    board.append(lane);
+  });
+
+  const voice = pattern.voices[active];
+  const editor = el("section", "card");
+  const split = el("div", "split");
+  const who = el("div");
+  who.append(el("h2", "", voice.name), el("p", "muted", voice.blurb));
+  const actions = el("div", "row");
+  const mute = el("button", voice.mute ? "" : "solid", voice.mute ? "Muted" : "On");
+  mute.onclick = () => { voice.mute = !voice.mute; save(); render(); };
+  const clear = el("button", "", "Clear");
+  clear.onclick = () => { voice.steps = empty(); save(); render(); };
+  actions.append(mute, clear);
+  split.append(who, actions);
+  editor.append(split);
+  const waves = el("div", "row");
+  WAVES.forEach((wave) => {
+    const b = el("button", voice.wave === wave ? "on" : "", WAVE_HELP[wave][0]);
+    b.onclick = () => { voice.wave = wave; save(); render(); };
+    waves.append(b);
+  });
+  editor.append(waves, el("p", "muted", WAVE_HELP[voice.wave][1]));
+  const octaves = el("div", "row");
+  octaves.append(el("span", "tiny muted", "Pitch"));
+  [-1, 0, 1].forEach((octave) => {
+    const b = el("button", voice.octave === octave ? "solid" : "", OCTAVE_HELP[String(octave)]);
+    b.onclick = () => { voice.octave = octave; save(); render(); };
+    octaves.append(b);
+  });
+  editor.append(octaves);
+  if (voice.wave === "hollow") {
+    const width = el("label", "slider");
+    width.append("Width");
+    const range = document.createElement("input");
+    range.type = "range"; range.min = "1"; range.max = "15"; range.value = String(voice.pulse);
+    range.oninput = () => { voice.pulse = Number(range.value); save(); };
+    width.append(range);
+    editor.append(width);
+  }
+  editor.append(el("p", "tiny muted", "Note to place"));
+  const notes = el("div", "row");
+  NOTES.forEach((name, degree) => {
+    const b = el("button", picked[active] === degree ? "solid" : "", name);
+    b.onclick = () => { picked[active] = degree; render(); };
+    notes.append(b);
+  });
+  const loud = el("label", "slider");
+  const loudTop = document.createElement("span");
+  loudTop.append("Loudness");
+  const loudRange = document.createElement("input");
+  loudRange.type = "range"; loudRange.min = "0"; loudRange.max = "100"; loudRange.value = String(Math.round(voice.level * 100));
+  loudRange.oninput = () => { voice.level = Number(loudRange.value) / 100; save(); };
+  loud.append(loudTop, loudRange);
+  editor.append(notes, loud);
+
+  const sliders = el("section", "card sliders");
+  sliders.append(slider("Speed", String(pattern.bpm), 60, 180, pattern.bpm, (v) => { pattern.bpm = v; save(); document.querySelector("#speed-hint").textContent = String(v); }, "speed-hint"));
+  sliders.append(slider("Tone", "Dark to bright", 0, 100, Math.round(pattern.tone * 100), (v) => { pattern.tone = v / 100; save(); }));
+  sliders.append(slider("Ring", "How much it sings", 0, 100, Math.round(pattern.ring * 100), (v) => { pattern.ring = v / 100; save(); }));
+
+  const shareRow = el("div", "row");
+  if (window.webxdc && typeof webxdc.sendUpdate === "function") {
+    const share = el("button", "", "Share pattern");
+    share.onclick = () => {
+      webxdc.sendUpdate({ payload: pattern, info: "SID pattern", summary: "SID-STEP", document: "SID-STEP" }, "");
+    };
+    shareRow.append(share);
+  }
+
+  root.append(header, board, editor, sliders, shareRow);
+  paintHead(head);
+}
+function slider(label, hint, min, max, value, oninput, hintId) {
+  const wrap = el("label", "slider");
+  const top = document.createElement("span");
+  top.append(label);
+  const em = document.createElement("em");
+  em.textContent = hint;
+  if (hintId) em.id = hintId;
+  top.append(em);
+  const range = document.createElement("input");
+  range.type = "range"; range.min = String(min); range.max = String(max); range.value = String(value);
+  range.oninput = () => oninput(Number(range.value));
+  wrap.append(top, range);
+  return wrap;
+}
+
+window.addEventListener("keydown", (event) => {
+  if (event.code !== "Space") return;
+  const tag = event.target && event.target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "BUTTON") return;
+  event.preventDefault();
+  if (eng.playing) eng.stop(); else eng.start();
   render();
-  if (ctx) applyFilter(filter, master);
-}
-["cutoff", "res", "vol", "bpm"].forEach((id) => $(id).addEventListener("input", readControls));
-$("play").onclick = toggle;
-$("share").onclick = share;
-$("wav").onclick = exportWav;
-window.addEventListener("keydown", (e) => { if (e.code === "Space" && e.target.tagName !== "INPUT") { e.preventDefault(); toggle(); } });
+});
 if (window.webxdc && typeof webxdc.setUpdateListener === "function") {
-  webxdc.setUpdateListener((u) => applyRemote(u.payload), 0);
+  webxdc.setUpdateListener((update) => {
+    const payload = update && update.payload;
+    if (!payload || !payload.voices) return;
+    pattern = payload;
+    save();
+    render();
+  }, 0);
 }
 render();
 </script>
