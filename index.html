@@ -37,7 +37,7 @@ Latest timestamp wins. Not an SPDX replacement. No profit or proprietary enclosu
   .pad.now.filled { background: var(--fg); color: var(--bg); border-color: var(--fg); }
   .pad.now:not(.filled) { border-color: var(--fg); background: var(--surface-2); color: var(--fg); }
   .split { display: flex; justify-content: space-between; gap: 0.8rem; align-items: flex-start; }
-  .sliders { display: grid; gap: 0.8rem; }
+  .sliders { display: grid; gap: 0.8rem; margin-top: 0.8rem; }
   @media (min-width: 720px) { .sliders { grid-template-columns: repeat(2, 1fr); } }
 @media (min-width: 960px) { .sliders { grid-template-columns: repeat(4, 1fr); } }
   label.slider { display: flex; flex-direction: column; gap: 0.25rem; color: var(--fg); font-size: 0.92rem; }
@@ -66,7 +66,7 @@ const STORE = "sid-step-ui-v2";
 
 function empty() { return Array(16).fill(null); }
 function voice(id, name, blurb, wave, octave, pulse, level, steps) {
-  return { id, name, blurb, wave, octave, pulse, level, mute: false, steps: steps.slice() };
+  return { id, name, blurb, wave, octave, pulse, level, mute: false, filter: true, steps: steps.slice() };
 }
 function presetTogether() {
   return {
@@ -117,14 +117,24 @@ let active = 0;
 let head = null;
 const eng = createEngine();
 
+function applyDefaults(p) {
+  const filter = p.filter;
+  p.filter = {
+    low: !filter || filter.low !== false,
+    band: !!(filter && filter.band === true),
+    high: !!(filter && filter.high === true)
+  };
+  p.voices.forEach((v) => { if (typeof v.filter !== "boolean") v.filter = true; });
+  return p;
+}
 function load() {
   try {
     const raw = localStorage.getItem(STORE);
     const parsed = raw && JSON.parse(raw);
     if (parsed && parsed.v == null) parsed.v = 1;
-    if (validPattern(parsed)) return parsed;
+    if (validPattern(parsed)) return applyDefaults(parsed);
   } catch (e) {}
-  const fresh = presetTogether();
+  const fresh = applyDefaults(presetTogether());
   fresh.v = 1;
   return fresh;
 }
@@ -156,17 +166,36 @@ function createEngine() {
     const ctx = new AudioContext();
     self.ctx = ctx;
     self.noise = makeNoise(ctx);
-    const mixer = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-    filter.type = "lowpass";
+    const filterIn = ctx.createGain();
     const master = ctx.createGain();
-    mixer.connect(filter); filter.connect(master); master.connect(ctx.destination);
-    self.filter = filter; self.master = master;
+    const kinds = [["low", "lowpass"], ["band", "bandpass"], ["high", "highpass"]];
+    self.bands = {};
+    self.modes = {};
+    kinds.forEach(([key, type]) => {
+      const filter = ctx.createBiquadFilter();
+      filter.type = type;
+      const gain = ctx.createGain();
+      gain.gain.value = key === "low" ? 1 : 0;
+      filterIn.connect(filter);
+      filter.connect(gain);
+      gain.connect(master);
+      self.bands[key] = filter;
+      self.modes[key] = gain;
+    });
+    master.connect(ctx.destination);
+    self.master = master;
     self.voices = [0, 1, 2].map(() => {
       const gain = ctx.createGain();
+      const dry = ctx.createGain();
+      const send = ctx.createGain();
       gain.gain.value = 0;
-      gain.connect(mixer);
-      return { gain, node: null, wave: null, pulse: 0 };
+      dry.gain.value = 0;
+      send.gain.value = 1;
+      gain.connect(dry);
+      gain.connect(send);
+      dry.connect(master);
+      send.connect(filterIn);
+      return { gain, dry, send, node: null, wave: null, pulse: 0 };
     });
   }
   function pulseWave(ctx, duty) {
@@ -222,9 +251,21 @@ function createEngine() {
     const ctx = self.ctx;
     if (ctx.state !== "running") return;
     if (self.audioOrigin == null) self.audioOrigin = ctx.currentTime - elapsed;
-    self.filter.frequency.setTargetAtTime(toneHz(pattern.tone), ctx.currentTime, 0.03);
-    self.filter.Q.setTargetAtTime(ringQ(pattern.ring), ctx.currentTime, 0.03);
+    applyDefaults(pattern);
+    const filter = pattern.filter;
+    const count = (filter.low ? 1 : 0) + (filter.band ? 1 : 0) + (filter.high ? 1 : 0);
+    const level = count ? 1 / Math.sqrt(count) : 0;
+    ["low", "band", "high"].forEach((key) => {
+      self.bands[key].frequency.setTargetAtTime(toneHz(pattern.tone), ctx.currentTime, 0.03);
+      self.bands[key].Q.setTargetAtTime(ringQ(pattern.ring), ctx.currentTime, 0.03);
+      self.modes[key].gain.setTargetAtTime(filter[key] ? level : 0, ctx.currentTime, 0.02);
+    });
     self.master.gain.setTargetAtTime(pattern.volume, ctx.currentTime, 0.03);
+    pattern.voices.forEach((voice, i) => {
+      const through = voice.filter !== false;
+      self.voices[i].send.gain.setTargetAtTime(through ? 1 : 0, ctx.currentTime, 0.02);
+      self.voices[i].dry.gain.setTargetAtTime(through ? 0 : 1, ctx.currentTime, 0.02);
+    });
     const horizon = ctx.currentTime + 0.08;
     while (self.audioOrigin + self.scheduledUntil < horizon) {
       const when = Math.max(self.audioOrigin + self.scheduledUntil, ctx.currentTime);
@@ -291,6 +332,7 @@ function paintHead(index) {
   status.textContent = sounding.length ? sounding.join(" · ") : "This step is silent. The line keeps moving.";
 }
 function render() {
+  applyDefaults(pattern);
   const root = document.getElementById("app");
   root.replaceChildren();
   const header = el("header");
@@ -344,11 +386,13 @@ function render() {
   const who = el("div");
   who.append(el("h2", "", voice.name), el("p", "muted", voice.blurb));
   const actions = el("div", "row");
+  const routed = el("button", voice.filter === false ? "" : "on", voice.filter === false ? "Dry" : "Filtered");
+  routed.onclick = () => { voice.filter = voice.filter === false; save(); render(); };
   const mute = el("button", voice.mute ? "" : "solid", voice.mute ? "Muted" : "On");
   mute.onclick = () => { voice.mute = !voice.mute; save(); render(); };
   const clear = el("button", "", "Clear");
   clear.onclick = () => { voice.steps = empty(); save(); render(); };
-  actions.append(mute, clear);
+  actions.append(routed, mute, clear);
   split.append(who, actions);
   editor.append(split);
   const waves = el("div", "row");
@@ -391,18 +435,28 @@ function render() {
   loud.append(loudTop, loudRange);
   editor.append(notes, loud);
 
-  const sliders = el("section", "card sliders");
-  sliders.append(slider("Speed", String(pattern.bpm), 60, 180, pattern.bpm, (v) => { pattern.bpm = v; save(); document.querySelector("#speed-hint").textContent = String(v); }, "speed-hint"));
-  sliders.append(slider("Tone", "Dark to bright", 0, 100, Math.round(pattern.tone * 100), (v) => { pattern.tone = v / 100; save(); }));
-  sliders.append(slider("Ring", "How much it sings", 0, 100, Math.round(pattern.ring * 100), (v) => { pattern.ring = v / 100; save(); }));
-  sliders.append(slider("Volume", "Loud or quiet", 0, 100, Math.round(pattern.volume * 100), (v) => { pattern.volume = v / 100; save(); }));
+  const sliders = el("section", "card");
+  const modes = el("div", "row");
+  modes.append(el("span", "tiny muted", "Filter"));
+  [["low", "Low"], ["band", "Band"], ["high", "High"]].forEach(([key, label]) => {
+    const b = el("button", pattern.filter[key] ? "on" : "", label);
+    b.onclick = () => { pattern.filter[key] = !pattern.filter[key]; save(); render(); };
+    modes.append(b);
+  });
+  sliders.append(modes, el("p", "muted", "Low, band, and high can be on together. Dry skips the filter. If none are on, filtered tracks go quiet."));
+  const grid = el("div", "sliders");
+  grid.append(slider("Speed", String(pattern.bpm), 60, 180, pattern.bpm, (v) => { pattern.bpm = v; save(); document.querySelector("#speed-hint").textContent = String(v); }, "speed-hint"));
+  grid.append(slider("Tone", "Dark to bright", 0, 100, Math.round(pattern.tone * 100), (v) => { pattern.tone = v / 100; save(); }));
+  grid.append(slider("Ring", "How much it sings", 0, 100, Math.round(pattern.ring * 100), (v) => { pattern.ring = v / 100; save(); }));
+  grid.append(slider("Volume", "Loud or quiet", 0, 100, Math.round(pattern.volume * 100), (v) => { pattern.volume = v / 100; save(); }));
+  sliders.append(grid);
 
   const shareRow = el("div", "row");
   if (window.webxdc && typeof webxdc.sendUpdate === "function") {
     const share = el("button", "", "Share pattern");
     share.onclick = () => {
       webxdc.sendUpdate({
-        payload: { v: 1, bpm: pattern.bpm, tone: pattern.tone, ring: pattern.ring, volume: pattern.volume, voices: pattern.voices },
+        payload: { v: 1, bpm: pattern.bpm, tone: pattern.tone, ring: pattern.ring, volume: pattern.volume, filter: pattern.filter, voices: pattern.voices },
         info: "SID pattern",
         summary: "SID-STEP",
         document: "SID-STEP"
@@ -432,6 +486,11 @@ function slider(label, hint, min, max, value, oninput, hintId) {
 function validPattern(payload) {
   if (!payload || payload.v !== 1 || !Array.isArray(payload.voices) || payload.voices.length !== 3) return false;
   if (!Number.isFinite(payload.bpm) || payload.bpm < 60 || payload.bpm > 180) return false;
+  if (payload.filter != null) {
+    const filter = payload.filter;
+    if (typeof filter !== "object") return false;
+    for (const key of ["low", "band", "high"]) if (typeof filter[key] !== "boolean") return false;
+  }
   for (const key of ["tone", "ring", "volume"]) {
     if (typeof payload[key] !== "number" || !Number.isFinite(payload[key]) || payload[key] < 0 || payload[key] > 1) return false;
   }
@@ -439,7 +498,7 @@ function validPattern(payload) {
     if (!voice || !WAVES.includes(voice.wave)) return false;
     if (![-1, 0, 1].includes(voice.octave)) return false;
     if (!Number.isInteger(voice.pulse) || voice.pulse < 1 || voice.pulse > 15) return false;
-    if (typeof voice.level !== "number" || !Number.isFinite(voice.level) || voice.level < 0 || voice.level > 1) return false;
+    if (voice.filter != null && typeof voice.filter !== "boolean") return false;
     if (!Array.isArray(voice.steps) || voice.steps.length !== 16) return false;
     if (voice.steps.some((step) => step !== null && (!Number.isInteger(step) || step < 0 || step > 7))) return false;
   }
@@ -460,7 +519,7 @@ if (window.webxdc && typeof webxdc.setUpdateListener === "function") {
   webxdc.setUpdateListener((update) => {
     try {
       if (!validPattern(update && update.payload)) return;
-      pattern = update.payload;
+      pattern = applyDefaults(update.payload);
       save();
       render();
     } catch (e) {}
