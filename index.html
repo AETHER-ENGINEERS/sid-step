@@ -45,6 +45,12 @@ Latest timestamp wins. Not an SPDX replacement. No profit or proprietary enclosu
   label.slider em { color: var(--muted); font-style: normal; }
   input[type="range"] { width: 100%; accent-color: var(--accent); }
   .tiny { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
+  .keys { position: sticky; bottom: 0; z-index: 4; background: #0e0c0a; border: 1px solid var(--line); border-radius: 0.8rem; padding: 0.45rem 0.4rem 0.5rem; }
+  .keyrow { display: flex; gap: 2px; overflow-x: auto; }
+  .keywrap { position: relative; flex: 0 0 2.35rem; }
+  button.key { min-height: 0; }
+  button.key.white { width: 100%; height: 6.4rem; background: #f4efe6; color: #1a1206; border-radius: 0 0 0.35rem 0.35rem; padding: 0 0 0.3rem; display: flex; align-items: flex-end; justify-content: center; font-size: 0.72rem; }
+  button.key.black { position: absolute; right: -0.72rem; top: 0; width: 1.45rem; height: 3.7rem; background: #14120f; color: #f4efe6; z-index: 2; padding: 0; font-size: 0.6rem; border-radius: 0 0 0.25rem 0.25rem; }
 </style>
 <script src="webxdc.js"></script>
 </head>
@@ -430,7 +436,7 @@ function createEngine() {
     });
     paintHead(null);
   };
-  self.tap = function (voiceIndex, degree) {
+  self.tapSemi = function (voiceIndex, semi) {
     boot();
     const ctx = self.ctx;
     const voice = pattern.voices[voiceIndex];
@@ -453,7 +459,8 @@ function createEngine() {
     node.connect(gain);
     gain.connect(slot.dry);
     gain.connect(slot.send);
-    const hz = tunedHz(voice.octave, degree, voice.fine);
+    const midi = 60 + voice.octave * 12 + semi;
+    const hz = sidHz(midi) * 2 ** ((voice.fine || 0) / 1200);
     if (node.frequency) node.frequency.setValueAtTime(hz, when);
     else node.playbackRate.setValueAtTime(Math.max(0.08, hz / 160), when);
     writeEnvelope(gain.gain, 0.28 * voice.level, when, dur, pattern, voice.wave === "drum");
@@ -622,12 +629,12 @@ function render() {
     width.append(range);
     editor.append(width);
   }
-  editor.append(el("p", "tiny muted", "Hear it"));
-  const keys = el("div", "row");
+  editor.append(el("p", "tiny muted", "Note to place"));
+  const notes = el("div", "row");
   NOTES.forEach((name, degree) => {
-    const b = el("button", "", name);
-    b.onpointerdown = (event) => { event.preventDefault(); eng.tap(active, degree); };
-    keys.append(b);
+    const b = el("button", picked[active] === degree ? "solid" : "", name);
+    b.onclick = () => { picked[active] = degree; render(); };
+    notes.append(b);
   });
   const fine = el("label", "slider");
   const fineTop = document.createElement("span");
@@ -639,14 +646,6 @@ function render() {
   fineRange.type = "range"; fineRange.min = "-100"; fineRange.max = "100"; fineRange.value = String(voice.fine || 0);
   fineRange.oninput = () => { voice.fine = Number(fineRange.value); fineHint.textContent = voice.fine + " cents"; save(); };
   fine.append(fineTop, fineRange);
-  editor.append(keys, fine);
-  editor.append(el("p", "tiny muted", "Note to place"));
-  const notes = el("div", "row");
-  NOTES.forEach((name, degree) => {
-    const b = el("button", picked[active] === degree ? "solid" : "", name);
-    b.onclick = () => { picked[active] = degree; render(); };
-    notes.append(b);
-  });
   const loud = el("label", "slider");
   const loudTop = document.createElement("span");
   loudTop.append("Loudness");
@@ -654,7 +653,7 @@ function render() {
   loudRange.type = "range"; loudRange.min = "0"; loudRange.max = "100"; loudRange.value = String(Math.round(voice.level * 100));
   loudRange.oninput = () => { voice.level = Number(loudRange.value) / 100; save(); };
   loud.append(loudTop, loudRange);
-  editor.append(notes, loud);
+  editor.append(notes, fine, loud);
   }
 
   const sliders = el("section", "card");
@@ -695,8 +694,31 @@ function render() {
     shareRow.append(share);
   }
 
-  root.append(header, board, editor, sliders, shareRow);
+  root.append(header, board, editor, sliders, shareRow, piano(active === 3 ? 0 : active));
   paintHead(head);
+}
+function piano(voiceIndex) {
+  const voice = pattern.voices[voiceIndex];
+  const bar = el("section", "keys");
+  bar.append(el("p", "tiny muted", active === 3 ? "Keys play Tune" : "Keys play " + voice.name));
+  const row = el("div", "keyrow");
+  const whites = [[0, "C"], [2, "D"], [4, "E"], [5, "F"], [7, "G"], [9, "A"], [11, "B"], [12, "C"], [14, "D"], [16, "E"], [17, "F"], [19, "G"], [21, "A"], [23, "B"]];
+  const blacks = { 1: "C#", 3: "D#", 6: "F#", 8: "G#", 10: "A#", 13: "C#", 15: "D#", 18: "F#", 20: "G#", 22: "A#" };
+  whites.forEach(([semi, name]) => {
+    const wrap = el("div", "keywrap");
+    const white = el("button", "key white", name);
+    white.onpointerdown = (event) => { event.preventDefault(); eng.tapSemi(voiceIndex, semi); };
+    wrap.append(white);
+    const sharp = semi + 1;
+    if (blacks[sharp]) {
+      const black = el("button", "key black", blacks[sharp]);
+      black.onpointerdown = (event) => { event.preventDefault(); event.stopPropagation(); eng.tapSemi(voiceIndex, sharp); };
+      wrap.append(black);
+    }
+    row.append(wrap);
+  });
+  bar.append(row);
+  return bar;
 }
 function slider(label, hint, min, max, value, oninput, hintId) {
   const wrap = el("label", "slider");

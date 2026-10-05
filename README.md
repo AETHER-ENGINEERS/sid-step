@@ -18,7 +18,8 @@ Older builds stay in [archive/](archive/) so each step is still there:
 | [archive/sid-step-0.0.8.xdc](archive/sid-step-0.0.8.xdc) | Low, band, and high. Cutoff and resonance were still labeled Tone and Ring. No sample row. |
 | [archive/sid-step-0.0.9.xdc](archive/sid-step-0.0.9.xdc) | Cutoff, resonance, and a sample row. The screen stayed black because a pitch label was missing. |
 | [archive/sid-step-0.0.10.xdc](archive/sid-step-0.0.10.xdc) | The screen draws. Notes are a short blip. No live keys. |
-| [sid-step.xdc](sid-step.xdc) | 0.0.11. Current. Attack, decay, sustain, release, a filter wobble, fine tune, and keys you can tap. |
+| [archive/sid-step-0.0.11.xdc](archive/sid-step-0.0.11.xdc) | Envelope, filter wobble, and fine tune. The keys were a second row of note letters, easy to miss. |
+| [sid-step.xdc](sid-step.xdc) | 0.0.12. Current. A piano stays pinned to the bottom. White and black keys. |
 
 Press Play. The bright column moves across all three lanes. Pick a note letter, tap a pad to place it, tap it again to clear it.
 
