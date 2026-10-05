@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SID-STEP</title>
+<!--
+OMARG-AIR/AID + AETHER-ENGINEERS Multiversal License.
+Full text in LICENSE. Canonical: https://github.com/AETHER-ENGINEERS/AETHER-ENGINEERS/blob/main/LICENSE
+Latest timestamp wins. Not an SPDX replacement. No profit or proprietary enclosure of this implementation.
+-->
+<style>
+  :root { --bg:#2020a0; --screen:#1d1d5c; --ink:#8f8fe0; --on:#43b451; --rest:#2a2a6a; --key:#16164a; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.3 ui-monospace, "Courier New", monospace; }
+  main { max-width:720px; margin:0 auto; padding:12px; }
+  h1 { margin:0 0 8px; font-size:18px; letter-spacing:2px; color:var(--on); }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:8px 0; }
+  button, .key { background:var(--key); color:var(--ink); border:2px solid var(--ink); min-height:44px; padding:6px 10px; font:inherit; }
+  button.on, .wave.on { background:var(--on); color:#102010; border-color:var(--on); }
+  button:disabled { opacity:.4; }
+  .grid { display:grid; grid-template-columns:72px repeat(16, 1fr); gap:3px; margin:10px 0; }
+  .cell { min-height:44px; background:var(--rest); border:1px solid #3a3a88; color:var(--ink); font-size:11px; }
+  .cell.hit { background:var(--on); color:#102010; }
+  .cell.play { outline:2px solid #d0d070; }
+  label { display:flex; flex-direction:column; gap:2px; font-size:11px; min-width:88px; }
+  input[type=range] { width:100%; }
+  .hex { color:#d0d070; }
+  .voicebar { display:flex; gap:4px; align-items:center; margin:4px 0; }
+</style>
+<script src="webxdc.js"></script>
+</head>
+<body>
+<main>
+  <h1>SID-STEP</h1>
+  <div class="row">
+    <button id="play" type="button">PLAY</button>
+    <button id="share" type="button">SHARE</button>
+    <button id="wav" type="button">EXPORT WAV</button>
+    <span id="status" class="hex">STOPPED</span>
+  </div>
+  <div id="grid" class="grid"></div>
+  <div id="voices"></div>
+  <div class="row">
+    <label>CUTOFF <input id="cutoff" type="range" min="0" max="100" value="65"><span id="cuthex" class="hex">$000</span></label>
+    <label>RES <input id="res" type="range" min="0" max="100" value="40"><span id="qhex" class="hex">Q 0.7</span></label>
+    <label>VOL <input id="vol" type="range" min="0" max="100" value="70"></label>
+    <label>BPM <input id="bpm" type="range" min="60" max="200" value="120"><span id="bpmv">120</span></label>
+  </div>
+  <div class="hex" id="regs">V1 $0000 · V2 $0000 · V3 $0000</div>
+</main>
+<script>
+const FCLK = 985248;
+const WAVES = ["pulse", "saw", "triangle", "noise"];
+const DEFAULT = {
+  v: 1, bpm: 120, cutoff: 0.65, resonance: 0.4, volume: 0.7,
+  voices: [
+    { wave: "saw", octave: 0, pulse: 8, steps: [0,-1,-1,-1, 7,-1,-1,-1, 12,-1,-1,-1, 7,-1,-1,-1] },
+    { wave: "pulse", octave: -1, pulse: 3, steps: [0,-1,-1,0, -1,-1,0,-1, 0,-1,-1,0, -1,-1,0,-1] },
+    { wave: "noise", octave: 0, pulse: 0, steps: [0,-1,-1,-1, -1,-1,-1,-1, 0,-1,-1,-1, -1,-1,-1,-1] }
+  ]
+};
+let pattern = loadLocal() || structuredClone(DEFAULT);
+const $ = (id) => document.getElementById(id);
+let ctx, mixer, filter, master, voices = [], noiseBuf, playing = false, step = 0, nextTime = 0, timer = 0;
+const pulseCache = new Map();
+
+function fnFromHz(hz) { return Math.max(0, Math.min(65535, Math.round(hz * 16777216 / FCLK))); }
+function hzFromFn(fn) { return fn * FCLK / 16777216; }
+function midiHz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+function voiceHz(v, offset) {
+  const midi = 60 + v.octave * 12 + offset;
+  return hzFromFn(fnFromHz(midiHz(midi)));
+}
+function hex4(n) { return "$" + n.toString(16).toUpperCase().padStart(4, "0"); }
+function cutHz(p) { return 80 * Math.pow(8000 / 80, p); }
+function qOf(p) { return 0.7 + p * (18 - 0.7); }
+
+function loadLocal() {
+  try { const s = localStorage.getItem("sid-step-v1"); return s ? JSON.parse(s) : null; } catch (e) { return null; }
+}
+function saveLocal() { try { localStorage.setItem("sid-step-v1", JSON.stringify(pattern)); } catch (e) {} }
+
+function render() {
+  const g = $("grid");
+  g.innerHTML = "";
+  const head = document.createElement("div");
+  head.textContent = "";
+  g.appendChild(head);
+  for (let s = 0; s < 16; s++) {
+    const h = document.createElement("div");
+    h.textContent = s + 1;
+    h.style.textAlign = "center";
+    g.appendChild(h);
+  }
+  pattern.voices.forEach((v, vi) => {
+    const lab = document.createElement("div");
+    lab.textContent = "V" + (vi + 1);
+    g.appendChild(lab);
+    v.steps.forEach((st, si) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "cell" + (st >= 0 ? " hit" : "") + (playing && si === step ? " play" : "");
+      b.textContent = st < 0 ? "·" : st;
+      b.onclick = () => { v.steps[si] = st < 0 ? 0 : st >= 15 ? -1 : st + 1; saveLocal(); render(); };
+      g.appendChild(b);
+    });
+  });
+  const box = $("voices");
+  box.innerHTML = "";
+  pattern.voices.forEach((v, vi) => {
+    const bar = document.createElement("div");
+    bar.className = "voicebar";
+    WAVES.forEach((w) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "wave" + (v.wave === w ? " on" : "");
+      b.textContent = w.slice(0, 3).toUpperCase();
+      b.onclick = () => { v.wave = w; saveLocal(); render(); };
+      bar.appendChild(b);
+    });
+    const oct = document.createElement("button");
+    oct.type = "button";
+    oct.textContent = "OCT " + v.octave;
+    oct.onclick = () => { v.octave = v.octave >= 2 ? -2 : v.octave + 1; saveLocal(); render(); };
+    bar.appendChild(oct);
+    const pw = document.createElement("button");
+    pw.type = "button";
+    pw.textContent = "PW " + v.pulse;
+    pw.disabled = v.wave !== "pulse";
+    pw.onclick = () => { v.pulse = v.pulse >= 15 ? 1 : v.pulse + 1; saveLocal(); render(); };
+    bar.appendChild(pw);
+    box.appendChild(bar);
+  });
+  $("cutoff").value = Math.round(pattern.cutoff * 100);
+  $("res").value = Math.round(pattern.resonance * 100);
+  $("vol").value = Math.round(pattern.volume * 100);
+  $("bpm").value = pattern.bpm;
+  $("bpmv").textContent = pattern.bpm;
+  const creg = Math.round(pattern.cutoff * 0x7ff);
+  $("cuthex").textContent = "$" + creg.toString(16).toUpperCase().padStart(3, "0");
+  $("qhex").textContent = "Q " + qOf(pattern.resonance).toFixed(1);
+  $("share").disabled = !(window.webxdc && typeof webxdc.sendUpdate === "function");
+}
+
+function pulseWave(dutyN) {
+  const d = Math.max(1, Math.min(15, dutyN)) / 16;
+  if (pulseCache.has(d)) return pulseCache.get(d);
+  const real = new Float32Array(32), imag = new Float32Array(32);
+  for (let n = 1; n < 32; n++) imag[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * d);
+  const w = ctx.createPeriodicWave(real, imag);
+  pulseCache.set(d, w);
+  return w;
+}
+function makeNoise(ac) {
+  const n = ac.sampleRate;
+  const buf = ac.createBuffer(1, n, ac.sampleRate);
+  const data = buf.getChannelData(0);
+  let lfsr = 0x7ffff;
+  for (let i = 0; i < n; i++) {
+    const bit = ((lfsr >> 22) ^ (lfsr >> 17)) & 1;
+    lfsr = ((lfsr << 1) | bit) & 0x7fffff;
+    data[i] = (lfsr & 1) ? 0.8 : -0.8;
+  }
+  return buf;
+}
+function applyFilter(acFilter, acMaster) {
+  acFilter.frequency.setTargetAtTime(cutHz(pattern.cutoff), acFilter.context.currentTime, 0.01);
+  acFilter.Q.setTargetAtTime(qOf(pattern.resonance), acFilter.context.currentTime, 0.01);
+  acMaster.gain.setTargetAtTime(pattern.volume, acMaster.context.currentTime, 0.01);
+}
+function boot() {
+  if (ctx) return;
+  ctx = new AudioContext();
+  noiseBuf = makeNoise(ctx);
+  mixer = ctx.createGain();
+  filter = ctx.createBiquadFilter();
+  filter.type = "lowpass";
+  master = ctx.createGain();
+  mixer.connect(filter); filter.connect(master); master.connect(ctx.destination);
+  voices = [0, 1, 2].map(() => {
+    const g = ctx.createGain();
+    g.gain.value = 0;
+    g.connect(mixer);
+    return { gain: g, node: null, wave: null, pulse: null };
+  });
+  applyFilter(filter, master);
+}
+function retarget(v, wave, pulse, when) {
+  if (v.wave === wave && (wave !== "pulse" || v.pulse === pulse) && v.node) return;
+  if (v.node) { try { v.node.stop(when); } catch (e) {} v.node.disconnect(); v.node = null; }
+  let node;
+  if (wave === "noise") {
+    node = ctx.createBufferSource();
+    node.buffer = noiseBuf;
+    node.loop = true;
+  } else {
+    node = ctx.createOscillator();
+    if (wave === "pulse") node.setPeriodicWave(pulseWave(pulse || 8));
+    else node.type = wave === "saw" ? "sawtooth" : "triangle";
+  }
+  node.connect(v.gain);
+  node.start(when);
+  v.node = node; v.wave = wave; v.pulse = pulse;
+}
+function schedule(when, si) {
+  const dur = 60 / pattern.bpm / 4;
+  pattern.voices.forEach((pv, i) => {
+    const v = voices[i];
+    retarget(v, pv.wave, pv.pulse, when);
+    const off = pv.steps[si];
+    const g = v.gain.gain;
+    g.cancelScheduledValues(when);
+    if (off < 0) {
+      g.setValueAtTime(0, when);
+      return;
+    }
+    const hz = voiceHz(pv, off);
+    if (v.node.frequency) v.node.frequency.setValueAtTime(hz, when);
+    else v.node.playbackRate.setValueAtTime(Math.max(0.05, hz / 440), when);
+    g.setValueAtTime(0, when);
+    g.linearRampToValueAtTime(0.3, when + 0.004);
+    g.setValueAtTime(0.3, when + Math.max(0.004, dur - 0.008));
+    g.linearRampToValueAtTime(0, when + dur);
+  });
+  const regs = pattern.voices.map((pv, i) => {
+    const off = pv.steps[si];
+    return "V" + (i + 1) + " " + (off < 0 ? "$----" : hex4(fnFromHz(voiceHz(pv, off))));
+  }).join(" · ");
+  setTimeout(() => { if (playing) { $("regs").textContent = regs; step = si; } }, Math.max(0, (when - ctx.currentTime) * 1000));
+}
+function tick() {
+  while (nextTime < ctx.currentTime + 0.025) {
+    schedule(nextTime, step);
+    nextTime += 60 / pattern.bpm / 4;
+    step = (step + 1) % 16;
+  }
+}
+async function toggle() {
+  boot();
+  if (ctx.state === "suspended") await ctx.resume();
+  playing = !playing;
+  $("play").textContent = playing ? "STOP" : "PLAY";
+  $("play").classList.toggle("on", playing);
+  $("status").textContent = playing ? "RUN" : "STOPPED";
+  if (playing) {
+    step = 0;
+    nextTime = ctx.currentTime + 0.05;
+    tick();
+    timer = setInterval(tick, 50);
+  } else {
+    clearInterval(timer);
+    voices.forEach((v) => v.gain.gain.cancelScheduledValues(ctx.currentTime));
+    voices.forEach((v) => v.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.01));
+  }
+}
+function readControls() {
+  pattern.cutoff = $("cutoff").value / 100;
+  pattern.resonance = $("res").value / 100;
+  pattern.volume = $("vol").value / 100;
+  pattern.bpm = +$("bpm").value;
+  saveLocal();
+  render();
+  if (ctx) applyFilter(filter, master);
+}
+function share() {
+  if (!window.webxdc || typeof webxdc.sendUpdate !== "function") return;
+  webxdc.sendUpdate({
+    payload: pattern,
+    info: "SID pattern",
+    summary: "SID-STEP",
+    document: "SID-STEP"
+  }, "");
+}
+function encodeWav(samples, rate) {
+  const n = samples.length;
+  const buf = new ArrayBuffer(44 + n * 2);
+  const view = new DataView(buf);
+  const w = (o, s) => { for (let i = 0; i < s.length; i++) view.setUint8(o + i, s.charCodeAt(i)); };
+  w(0, "RIFF"); view.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt ");
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true); view.setUint32(28, rate * 2, true); view.setUint16(32, 2, true); view.setUint16(34, 16, true);
+  w(36, "data"); view.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(44 + i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buf;
+}
+function download(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+  a.download = "sid-step.wav";
+  a.click();
+}
+async function exportWav() {
+  $("status").textContent = "RENDER";
+  const rate = 44100;
+  const dur = 60 / pattern.bpm / 4;
+  const off = new OfflineAudioContext(1, Math.ceil(rate * dur * 16) + rate, rate);
+  const nb = makeNoise(off);
+  const mix = off.createGain(), fil = off.createBiquadFilter(), mas = off.createGain();
+  fil.type = "lowpass";
+  fil.frequency.value = cutHz(pattern.cutoff);
+  fil.Q.value = qOf(pattern.resonance);
+  mas.gain.value = pattern.volume;
+  mix.connect(fil); fil.connect(mas); mas.connect(off.destination);
+  const nodes = pattern.voices.map((pv) => {
+    const g = off.createGain(); g.gain.value = 0; g.connect(mix);
+    let node;
+    if (pv.wave === "noise") { node = off.createBufferSource(); node.buffer = nb; node.loop = true; }
+    else {
+      node = off.createOscillator();
+      if (pv.wave === "pulse") {
+        const d = Math.max(1, pv.pulse) / 16;
+        const real = new Float32Array(32), imag = new Float32Array(32);
+        for (let n = 1; n < 32; n++) imag[n] = (2 / (n * Math.PI)) * Math.sin(n * Math.PI * d);
+        node.setPeriodicWave(off.createPeriodicWave(real, imag));
+      } else node.type = pv.wave === "saw" ? "sawtooth" : "triangle";
+    }
+    node.connect(g); node.start(0);
+    return { node, g, pv };
+  });
+  for (let s = 0; s < 16; s++) {
+    const when = s * dur;
+    nodes.forEach(({ node, g, pv }) => {
+      const offst = pv.steps[s];
+      const gain = g.gain;
+      if (offst < 0) { gain.setValueAtTime(0, when); return; }
+      const hz = voiceHz(pv, offst);
+      if (node.frequency) node.frequency.setValueAtTime(hz, when);
+      else node.playbackRate.setValueAtTime(Math.max(0.05, hz / 440), when);
+      gain.setValueAtTime(0, when);
+      gain.linearRampToValueAtTime(0.3, when + 0.004);
+      gain.setValueAtTime(0.3, when + Math.max(0.004, dur - 0.008));
+      gain.linearRampToValueAtTime(0, when + dur);
+    });
+  }
+  const audio = await off.startRendering();
+  const raw = audio.getChannelData(0);
+  const pcm = encodeWav(raw, rate);
+  let bin = "";
+  const bytes = new Uint8Array(pcm);
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  const b64 = btoa(bin);
+  try {
+    if (!window.webxdc || typeof webxdc.sendToChat !== "function") return download(b64);
+    await webxdc.sendToChat({ file: { base64: b64, name: "sid-step.wav" }, text: "SID-STEP one bar" });
+  } catch (e) { download(b64); }
+  $("status").textContent = playing ? "RUN" : "STOPPED";
+}
+function applyRemote(p) {
+  if (!p || p.v !== 1 || !Array.isArray(p.voices)) return;
+  pattern = p;
+  saveLocal();
+  render();
+  if (ctx) applyFilter(filter, master);
+}
+["cutoff", "res", "vol", "bpm"].forEach((id) => $(id).addEventListener("input", readControls));
+$("play").onclick = toggle;
+$("share").onclick = share;
+$("wav").onclick = exportWav;
+window.addEventListener("keydown", (e) => { if (e.code === "Space" && e.target.tagName !== "INPUT") { e.preventDefault(); toggle(); } });
+if (window.webxdc && typeof webxdc.setUpdateListener === "function") {
+  webxdc.setUpdateListener((u) => applyRemote(u.payload), 0);
+}
+render();
+</script>
+</body>
+</html>
