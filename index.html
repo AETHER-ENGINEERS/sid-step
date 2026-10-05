@@ -45,6 +45,7 @@ Latest timestamp wins. Not an SPDX replacement. No profit or proprietary enclosu
   input[type="range"] { width: 100%; accent-color: var(--accent); }
   .tiny { font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; }
 </style>
+<script src="webxdc.js"></script>
 </head>
 <body>
 <main id="app"></main>
@@ -104,7 +105,7 @@ const PRESETS = [
 
 function sidHz(midi) {
   const hz = 440 * 2 ** ((midi - 69) / 12);
-  const fn = Math.max(0, Math.min(65535, Math.round(hz * 16777216 / FCLK)));
+  const fn = Math.max(0, Math.min(16777215, Math.round(hz * 16777216 / FCLK)));
   return fn * FCLK / 16777216;
 }
 function midiFor(octave, degree) { return 60 + octave * 12 + SEMI[degree]; }
